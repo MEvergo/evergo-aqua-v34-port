@@ -3372,7 +3372,8 @@ static void walk_pmd_range_locked(pud_t *pud, unsigned long next, struct vm_area
 			goto next;
 
 		if (!pmd_trans_huge(pmd[i])) {
-			if (IS_ENABLED(CONFIG_ARCH_HAS_NONLEAF_PMD_YOUNG) &&
+			if (!priv->full_scan &&
+			    IS_ENABLED(CONFIG_ARCH_HAS_NONLEAF_PMD_YOUNG) &&
 			    get_cap(LRU_GEN_NONLEAF_YOUNG) && !mm_has_notifiers(walk->mm))
 				pmdp_test_and_clear_young(vma, addr, pmd + i);
 			goto next;
@@ -3481,7 +3482,8 @@ restart:
 		priv->mm_stats[MM_PMD_TOTAL]++;
 
 #ifdef CONFIG_ARCH_HAS_NONLEAF_PMD_YOUNG
-		if (get_cap(LRU_GEN_NONLEAF_YOUNG) && !mm_has_notifiers(walk->mm)) {
+		if (!priv->full_scan &&
+		    get_cap(LRU_GEN_NONLEAF_YOUNG) && !mm_has_notifiers(walk->mm)) {
 			if (!pmd_young(val))
 				continue;
 
