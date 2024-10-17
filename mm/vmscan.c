@@ -4023,8 +4023,11 @@ bool lru_gen_look_around(struct page_vma_mapped_walk *pvmw)
 	walk = current->reclaim_state ? current->reclaim_state->mm_walk : NULL;
 
 	if (!walk && bitmap_weight(bitmap, MIN_LRU_BATCH) < PAGEVEC_SIZE) {
-		for_each_set_bit(i, bitmap, MIN_LRU_BATCH)
-			activate_page(pte_page(pte[i]));
+		for_each_set_bit(i, bitmap, MIN_LRU_BATCH) {
+			page = compound_head(pte_page(pte[i]));
+			page_clear_lru_refs(page);
+			activate_page(page);
+		}
 		return true;
 	}
 

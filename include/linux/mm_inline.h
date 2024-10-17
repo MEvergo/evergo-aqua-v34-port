@@ -127,6 +127,11 @@ static inline int lru_tier_from_refs(int refs)
 	return order_base_2(refs + 1);
 }
 
+static inline void page_clear_lru_refs(struct page *page)
+{
+	set_mask_bits(&page->flags, LRU_REFS_MASK | LRU_REFS_FLAGS, 0);
+}
+
 static inline bool lru_gen_is_active(struct lruvec *lruvec, int gen)
 {
 	unsigned long max_seq = lruvec->lrugen.max_seq;
@@ -186,7 +191,7 @@ static inline void lru_gen_update_size(struct lruvec *lruvec, struct page *page,
 static inline bool lru_gen_add_page(struct lruvec *lruvec, struct page *page, bool reclaiming)
 {
 	int gen;
-	unsigned long old_flags, new_flags;
+	unsigned long old_flags, new_flags, mask;
 	int type = page_is_file_cache(page);
 	int zone = page_zonenum(page);
 	struct lru_gen_struct *lrugen = &lruvec->lrugen;
@@ -215,12 +220,20 @@ static inline bool lru_gen_add_page(struct lruvec *lruvec, struct page *page, bo
 	else
 		gen = lru_gen_from_seq(lrugen->min_seq[type] + 1);
 
+	mask = LRU_GEN_MASK;
+	/*
+	 * Don't clear PG_workingset here because it can affect PSI accounting
+	 * if the activation is due to workingset refault.
+	 */
+	if (PageActive(page))
+		mask |= LRU_REFS_MASK | BIT(PG_referenced) | BIT(PG_active);
+
 	do {
 		new_flags = old_flags = READ_ONCE(page->flags);
 		VM_BUG_ON_PAGE(new_flags & LRU_GEN_MASK, page);
 
 		/* see the comment on MIN_NR_GENS */
-		new_flags &= ~(LRU_GEN_MASK | BIT(PG_active));
+		new_flags &= ~mask;
 		new_flags |= (gen + 1UL) << LRU_GEN_PGOFF;
 	} while (cmpxchg(&page->flags, old_flags, new_flags) != old_flags);
 
