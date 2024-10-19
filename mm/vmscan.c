@@ -54,6 +54,7 @@
 #include <linux/shmem_fs.h>
 #include <linux/ctype.h>
 #include <linux/debugfs.h>
+#include <linux/mmu_notifier.h>
 
 #include <asm/tlbflush.h>
 #include <asm/div64.h>
@@ -3279,7 +3280,7 @@ restart:
 		if (WARN_ON_ONCE(pte_devmap(pte[i]) || pte_special(pte[i])))
 			continue;
 
-		if (!pte_young(pte[i])) {
+		if (!pte_young(pte[i]) && !mm_has_notifiers(walk->mm)) {
 			priv->mm_stats[MM_PTE_OLD]++;
 			continue;
 		}
@@ -3295,7 +3296,7 @@ restart:
 		if (page_memcg_rcu(page) != memcg)
 			continue;
 
-		if (!ptep_test_and_clear_young(walk->vma, addr, pte + i))
+		if (!ptep_clear_young_notify(walk->vma, addr, pte + i))
 			continue;
 
 		young++;
@@ -3370,7 +3371,7 @@ static void walk_pmd_range_locked(pud_t *pud, unsigned long next, struct vm_area
 
 		if (!pmd_trans_huge(pmd[i])) {
 			if (IS_ENABLED(CONFIG_ARCH_HAS_NONLEAF_PMD_YOUNG) &&
-			    get_cap(LRU_GEN_NONLEAF_YOUNG))
+			    get_cap(LRU_GEN_NONLEAF_YOUNG) && !mm_has_notifiers(walk->mm))
 				pmdp_test_and_clear_young(vma, addr, pmd + i);
 			goto next;
 		}
@@ -3387,7 +3388,7 @@ static void walk_pmd_range_locked(pud_t *pud, unsigned long next, struct vm_area
 		if (page_memcg_rcu(page) != memcg)
 			goto next;
 
-		if (!pmdp_test_and_clear_young(vma, addr, pmd + i))
+		if (!pmdp_clear_young_notify(vma, addr, pmd + i))
 			goto next;
 
 		priv->mm_stats[MM_PTE_YOUNG]++;
@@ -3463,7 +3464,7 @@ restart:
 			if (is_huge_zero_pmd(val))
 				continue;
 
-			if (!pmd_young(val)) {
+			if (!pmd_young(val) && !mm_has_notifiers(walk->mm)) {
 				priv->mm_stats[MM_PTE_OLD]++;
 				continue;
 			}
@@ -3478,7 +3479,7 @@ restart:
 		priv->mm_stats[MM_PMD_TOTAL]++;
 
 #ifdef CONFIG_ARCH_HAS_NONLEAF_PMD_YOUNG
-		if (get_cap(LRU_GEN_NONLEAF_YOUNG)) {
+		if (get_cap(LRU_GEN_NONLEAF_YOUNG) && !mm_has_notifiers(walk->mm)) {
 			if (!pmd_young(val))
 				continue;
 
@@ -3918,16 +3919,16 @@ static void lru_gen_age_node(struct pglist_data *pgdat, struct scan_control *sc)
  * to the PTE table to the Bloom filter. This process is a feedback loop from
  * the eviction to the aging.
  */
-void lru_gen_look_around(struct page_vma_mapped_walk *pvmw)
+bool lru_gen_look_around(struct page_vma_mapped_walk *pvmw)
 {
 	int i;
-	pte_t *pte;
+	pte_t *pte = pvmw->pte;
 	unsigned long start;
 	unsigned long end;
-	unsigned long addr;
+	unsigned long addr = pvmw->address;
 	struct page *page;
 	struct lru_gen_mm_walk *walk;
-	int young = 0;
+	int young = 1;
 	unsigned long bitmap[BITS_TO_LONGS(MIN_LRU_BATCH)] = {};
 	struct vm_area_struct *vma = pvmw->vma;
 	struct mem_cgroup *memcg = page_memcg(pvmw->page);
@@ -3939,15 +3940,21 @@ void lru_gen_look_around(struct page_vma_mapped_walk *pvmw)
 	lockdep_assert_held(pvmw->ptl);
 	VM_BUG_ON_PAGE(PageLRU(pvmw->page), pvmw->page);
 
+	if (!ptep_clear_young_notify(vma, addr, pte))
+		return false;
+
 	if (spin_is_contended(pvmw->ptl))
-		return;
+		return true;
 
 	/* exclude special VMAs containing anon pages from COW */
 	if (vma->vm_flags & VM_SPECIAL)
-		return;
+		return true;
 
 	start = max(pvmw->address & PMD_MASK, vma->vm_start);
 	end = pmd_addr_end(pvmw->address, vma->vm_end);
+
+	if (end - start == PAGE_SIZE)
+		return true;
 
 	if (end - start > MIN_LRU_BATCH * PAGE_SIZE) {
 		if (pvmw->address - start < MIN_LRU_BATCH * PAGE_SIZE / 2)
@@ -3976,7 +3983,7 @@ void lru_gen_look_around(struct page_vma_mapped_walk *pvmw)
 		if (WARN_ON_ONCE(pte_devmap(pte[i]) || pte_special(pte[i])))
 			continue;
 
-		if (!pte_young(pte[i]))
+		if (!pte_young(pte[i]) && !mm_has_notifiers(vma->vm_mm))
 			continue;
 
 		VM_BUG_ON(!pfn_valid(pfn));
@@ -3990,7 +3997,7 @@ void lru_gen_look_around(struct page_vma_mapped_walk *pvmw)
 		if (page_memcg_rcu(page) != memcg)
 			continue;
 
-		if (!ptep_test_and_clear_young(vma, addr, pte + i))
+		if (!ptep_clear_young_notify(vma, addr, pte + i))
 			continue;
 
 		young++;
@@ -4018,12 +4025,12 @@ void lru_gen_look_around(struct page_vma_mapped_walk *pvmw)
 	if (!walk && bitmap_weight(bitmap, MIN_LRU_BATCH) < PAGEVEC_SIZE) {
 		for_each_set_bit(i, bitmap, MIN_LRU_BATCH)
 			activate_page(pte_page(pte[i]));
-		return;
+		return true;
 	}
 
 	/* page_update_gen() requires stable page_memcg() */
 	if (!mem_cgroup_trylock_pages(memcg))
-		return;
+		return true;
 
 	if (!walk) {
 		spin_lock_irq(&pgdat->lru_lock);
@@ -4049,6 +4056,8 @@ void lru_gen_look_around(struct page_vma_mapped_walk *pvmw)
 		spin_unlock_irq(&pgdat->lru_lock);
 
 	mem_cgroup_unlock_pages();
+
+	return true;
 }
 
 /******************************************************************************
