@@ -2304,7 +2304,6 @@ enum scan_balance {
 	SCAN_FILE,
 };
 
-
 /*
  * Determine how aggressively the anon and file LRU lists should be
  * scanned.  The relative value of each set of LRU lists is determined
@@ -4153,8 +4152,9 @@ static bool isolate_page(struct lruvec *lruvec, struct page *page, struct scan_c
 	return true;
 }
 
-static int scan_pages(struct lruvec *lruvec, struct scan_control *sc,
-		      int type, int tier, struct list_head *list)
+static int scan_pages(unsigned long nr_to_scan, struct lruvec *lruvec,
+		      struct scan_control *sc, int type, int tier,
+		      struct list_head *list)
 {
 	int i;
 	int gen;
@@ -4162,7 +4162,7 @@ static int scan_pages(struct lruvec *lruvec, struct scan_control *sc,
 	int sorted = 0;
 	int scanned = 0;
 	int isolated = 0;
-	int remaining = MAX_LRU_BATCH;
+	int remaining = min_t(unsigned long, nr_to_scan, MAX_LRU_BATCH);
 	struct lru_gen_struct *lrugen = &lruvec->lrugen;
 	struct mem_cgroup *memcg = lruvec_memcg(lruvec);
 
@@ -4280,7 +4280,8 @@ static int get_type_to_scan(struct lruvec *lruvec, int swappiness, int *tier_idx
 	return type;
 }
 
-static int isolate_pages(struct lruvec *lruvec, struct scan_control *sc, int swappiness,
+static int isolate_pages(unsigned long nr_to_scan, struct lruvec *lruvec,
+			 struct scan_control *sc, int swappiness,
 			 int *type_scanned, struct list_head *list)
 {
 	int i;
@@ -4316,7 +4317,7 @@ static int isolate_pages(struct lruvec *lruvec, struct scan_control *sc, int swa
 		if (tier < 0)
 			tier = get_tier_idx(lruvec, type);
 
-		scanned = scan_pages(lruvec, sc, type, tier, list);
+		scanned = scan_pages(nr_to_scan, lruvec, sc, type, tier, list);
 		if (scanned)
 			break;
 
@@ -4329,8 +4330,8 @@ static int isolate_pages(struct lruvec *lruvec, struct scan_control *sc, int swa
 	return scanned;
 }
 
-static int evict_pages(struct lruvec *lruvec, struct scan_control *sc, int swappiness,
-		       bool *swapped)
+static int evict_pages(unsigned long nr_to_scan, struct lruvec *lruvec,
+		       struct scan_control *sc, int swappiness, bool *swapped)
 {
 	int type;
 	int scanned;
@@ -4347,7 +4348,7 @@ static int evict_pages(struct lruvec *lruvec, struct scan_control *sc, int swapp
 
 	spin_lock_irq(&pgdat->lru_lock);
 
-	scanned = isolate_pages(lruvec, sc, swappiness, &type, &list);
+	scanned = isolate_pages(nr_to_scan, lruvec, sc, swappiness, &type, &list);
 
 	if (try_to_inc_min_seq(lruvec, swappiness))
 		scanned++;
@@ -4448,6 +4449,7 @@ static long get_nr_to_scan(struct lruvec *lruvec, struct scan_control *sc, bool 
 	if (!need_aging) {
 		sc->memcgs_need_aging = false;
 		return nr_to_scan;
+
 	}
 
 	/* leave the work to lru_gen_age_node() */
@@ -4491,7 +4493,7 @@ static unsigned long lru_gen_shrink_lruvec(struct lruvec *lruvec, struct scan_co
 		if (!nr_to_scan)
 			break;
 
-		delta = evict_pages(lruvec, sc, swappiness, &swapped);
+		delta = evict_pages(nr_to_scan, lruvec, sc, swappiness, &swapped);
 		if (!delta)
 			break;
 
@@ -4958,7 +4960,8 @@ static int run_eviction(struct lruvec *lruvec, unsigned long seq, struct scan_co
 		DEFINE_MIN_SEQ(lruvec);
 
 		if (seq < min_seq[!swappiness] || sc->nr_reclaimed >= nr_to_reclaim ||
-		    !evict_pages(lruvec, sc, swappiness, NULL)) {
+		    !evict_pages(nr_to_reclaim - sc->nr_reclaimed, lruvec, sc,
+				 swappiness, NULL)) {
 			err = 0;
 			break;
 		}
