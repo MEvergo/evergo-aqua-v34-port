@@ -828,7 +828,12 @@ static bool page_referenced_one(struct page *page, struct vm_area_struct *vma,
 			return false; /* To break the loop */
 		}
 
-		if (lru_gen_enabled() && pvmw.pte &&
+		/*
+		 * When LRU is switching, we don't know where the surrounding pages
+		 * are -- they could be on active/inactive lists or on MGLRU. So the
+		 * simplest approach is to disable this look-around optimization.
+		 */
+		if (lru_gen_enabled() && !lru_gen_switching() && pvmw.pte &&
 		    !(vma->vm_flags & (VM_SEQ_READ | VM_RAND_READ))) {
 			if (lru_gen_look_around(&pvmw))
 				referenced++;
