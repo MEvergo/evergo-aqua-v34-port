@@ -4140,10 +4140,6 @@ static bool isolate_page(struct lruvec *lruvec, struct page *page, struct scan_c
 	if (!sc->may_unmap && page_mapped(page))
 		return false;
 
-	if (!(sc->may_writepage && (sc->gfp_mask & __GFP_IO)) &&
-	    (PageDirty(page) || (PageAnon(page) && !PageSwapCache(page))))
-		return false;
-
 	if (!get_page_unless_zero(page))
 		return false;
 
