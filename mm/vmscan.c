@@ -4366,9 +4366,8 @@ retry:
 		}
 
 		if (PageReclaim(page) && (PageDirty(page) || PageWriteback(page))) {
-			/* restore LRU_REFS_FLAGS cleared by isolate_page() */
-			if (PageWorkingset(page))
-				SetPageReferenced(page);
+			/* Clear tier refs when promoting rejected pages. */
+			page_clear_lru_refs(page);
 			continue;
 		}
 
