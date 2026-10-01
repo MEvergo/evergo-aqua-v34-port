@@ -42,10 +42,10 @@
 | 28 | `7084c333e121567533255371aa67f687b01ef5ff` | clone3 core and clone_args | 27、24 | 已合入：`39257675eba0`，补足 x86 compat/do_fork 的 legacy PIDFD 指针和冲突校验 |
 | 29 | `38273f9fbd74be179f77106707bc2fc8a844b52b` | Wire clone3 syscall 435 | 28 | 已合入：`1d1bde75fa3d`、`b76e5fe33f84`；补齐 x86 compat_sys_clone3 |
 | 30 | `7ed966f471a802cfc8156f2513e7995a885f7a74` | Unsupported-arch clone3 guards | 29 | 已合入：`d0e9997306c2` |
-| 31 | `12f2b25517ca85edad063f480d8f3e6be8f27c5d` | Legacy CLONE_PIDFD with clone3 | 30 | 处理中：AquaCommit31LegacyPidfd |
+| 31 | `12f2b25517ca85edad063f480d8f3e6be8f27c5d` | Legacy CLONE_PIDFD with clone3 | 30 | 已合入：`0d55765a4701`；保留三个 ABI 入口已有 pidfd 指针映射 |
 | 32 | `d32a118be5e77328057c18be352931d0b3bb1aed` | clone_args __ASSEMBLY__ guards | 28 | 已合入：`e22be4939bf9` |
 | 33 | `306a9638758d34039eb632779d42c2c170ca35e7` | clone_args kernel-doc | 32 | 已合入：`d916da60c6d1` |
-| 34 | `e363cc3a6ae4d9b214704e57dc8613e6fea5970d` | CLONE_CLEAR_SIGHAND | 31、33 | 待派发 |
+| 34 | `e363cc3a6ae4d9b214704e57dc8613e6fea5970d` | CLONE_CLEAR_SIGHAND | 31、33 | 处理中：AquaCommit34ClearSighand |
 | 35 | `72dd3629520f194eba24240b6d8143f5f990fd5f` | CLONE_CLEAR_SIGHAND selftest | 34 | 待派发 |
 | 36 | `a1ae3900cf263692ba599b7f720f6868165783ae` | clone3 base selftests | 35 | 待派发 |
 | 37 | `41abee1fff4bab468da9845c7e0318f5f7417cbd` | clone3 set_tid PID selection | 34 | 待派发 |
