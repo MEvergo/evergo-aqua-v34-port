@@ -36,6 +36,7 @@
 /*
  * Arguments for the clone3 syscall
  */
+#ifndef __ASSEMBLY__
 struct clone_args {
 	__aligned_u64 flags;
 	__aligned_u64 pidfd;
@@ -46,6 +47,7 @@ struct clone_args {
 	__aligned_u64 stack_size;
 	__aligned_u64 tls;
 };
+#endif
 
 /*
  * Scheduling policies
