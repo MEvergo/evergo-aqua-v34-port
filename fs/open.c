@@ -14,6 +14,7 @@
 #include <linux/namei.h>
 #include <linux/backing-dev.h>
 #include <linux/capability.h>
+#include <linux/cred.h>
 #include <linux/securebits.h>
 #include <linux/security.h>
 #include <linux/mount.h>
@@ -897,6 +898,18 @@ int vfs_open(const struct path *path, struct file *file)
 	return do_dentry_open(file, d_backing_inode(dentry), NULL);
 }
 
+static void file_open_set_cred(struct file *file, const struct cred *cred)
+{
+	const struct cred *old;
+
+	if (file->f_cred == cred)
+		return;
+
+	old = file->f_cred;
+	file->f_cred = get_cred(cred);
+	put_cred(old);
+}
+
 struct file *dentry_open(const struct path *path, int flags,
 			 const struct cred *cred)
 {
@@ -911,6 +924,7 @@ struct file *dentry_open(const struct path *path, int flags,
 	f = get_empty_filp();
 	if (!IS_ERR(f)) {
 		f->f_flags = flags;
+		file_open_set_cred(f, cred);
 		error = vfs_open(path, f);
 		if (!error) {
 			/* from now on we need fput() to dispose of f */
@@ -1062,6 +1076,7 @@ struct file *filp_clone_open(struct file *oldfile)
 		return file;
 
 	file->f_flags = oldfile->f_flags;
+	file_open_set_cred(file, oldfile->f_cred);
 	retval = vfs_open(&oldfile->f_path, file);
 	if (retval) {
 		put_filp(file);
