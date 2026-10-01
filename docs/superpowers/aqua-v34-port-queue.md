@@ -2,6 +2,8 @@
 
 目标：将官方 AquaV3.3（`8ffca656f1f7bb1c9953aa053f8233a8543540dc`）至 AquaV3.4（`d81fee89be1c86979a2421933a0741f55918cc44`）的 **48 条线性提交**逐项审查、移植至当前 evergo 定制内核。私有仓库的完整源码根快照为 `c06481269a1113dc439f7c74b92059af8691221f`（从本地 `fbcac3e375a014823fbe39255e0674740dfdc5c9` 的源码快照导出）；它已包含原始工作树的未提交修改、`mm/vmscan.c` 的 per-zone 修复，以及从外链实体化的本地改动版 SukiSU 内核源码。`lineage-24.0` 默认开发分支是另一条重写历史，不能把它的历史提交混进这 48 条队列。
 
+固定主源码工作目录：`kernel/current`（分支 `aqua-v34-port-main`）；今后开发和离线构建均以此树为准。原始带未提交修改的 `kernel/worktrees/v33-aqua-xgf-sukisu-v42-susfs-nomount` 与旧 donor `kernel/source` 原样保留，仅作历史参考；保留的逐提交临时工作树统一归档至 `kernel/archive/aqua-port-worktrees/`，不作为日常工作入口。
+
 ## 执行约定
 
 - **一条上游提交对应一个新的实现 subagent**。按下面顺序和依赖分批安排；只把文件互不冲突且没有先后依赖的提交放入同一批。每位 agent 只负责自己的 SHA，不得擅自扩展到其他上游提交。控制者拥有集成分支，逐个核对变更并记录状态。
