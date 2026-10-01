@@ -14,7 +14,7 @@
 |---:|---|---|---|---|
 | 01 | `9387a4e13dab74c017379a691061a4c0d06354f5` | power_supply: Create input_suspend node | — | 已合入：`87f07b7faa37`（无效输入明确返回解析错误） |
 | 02 | `28123b05c48f3a3f68bd2880799d163817510b1d` | binder: Checkout to android-4.19-stable | — | 已合入：`ca6b8849caa5`，保留已存在的 4.14 Binder API 形式 |
-| 03 | `5afd363a10c1e44187095efdabd3cafdd001e884` | binder: Fix 4.19 binder compilation on 4.14 | 02 | 处理中：AquaCommit03BinderCompat |
+| 03 | `5afd363a10c1e44187095efdabd3cafdd001e884` | binder: Fix 4.19 binder compilation on 4.14 | 02 | 已合入：`6a482eb6ddb6`，补足 eventpoll 头；其余适配已存在且保留 allocator 调试类别 |
 | 04 | `7042fefca96282acdaa6d1c89ff28eb59b5f3bb6` | netprio: use css ID instead of cgroup ID | — | 已合入：`6ba8e00c1d1a` |
 | 05 | `a184e7d6c259c73c66cc884f65a06e7891508cf8` | BPF-5.10 large import (one-parent, substantive) | 04 | 处理中：AquaCommit05BpfImport |
 | 06 | `2a866e985f5ee69dd2795860fe5f83f747a612d8` | cgroup ID access via kernfs node | 05 | 待派发 |
@@ -34,8 +34,8 @@
 | 20 | `0aab45864e4950a0c05da0aa5d5e776d24b2c9cf` | modpost match() const qualifier | 19 | 已合入：`e18d05c39975` |
 | 21 | `a3970ca73e102de6912deb3c84a8b4d4dcf11511` | Remove stale x86 syscall prototype | — | 已合入：`a83e33309492` |
 | 22 | `afab5249b866ba2abe3b7ea6726c9a92a8d883e4` | x86 compat syscall macros | 21 | 已合入：`03df1bca365c`，对应迁移 15 个兼容系统调用入口 |
-| 23 | `da9a810b2c77de53ccb0798b0e8f5a3bfe35a867` | x86 compat clone entry | 22 | 处理中：AquaCommit23X86CloneEntry |
-| 24 | `412c5c2fd76ac1348931d5f712dea065d3f9ac0f` | x86 compat clone _do_fork | 23 | 待派发 |
+| 23 | `da9a810b2c77de53ccb0798b0e8f5a3bfe35a867` | x86 compat clone entry | 22 | 已合入：`0d1c1077bcad` |
+| 24 | `412c5c2fd76ac1348931d5f712dea065d3f9ac0f` | x86 compat clone _do_fork | 23 | 处理中：AquaCommit24X86DoFork |
 | 25 | `fef4466bd4ae7aa2ec66d01f6a1bda57e5beb082` | pidfd creation and cleanup | 05 | 待派发 |
 | 26 | `ee66522755e6cef28769925bff19b565e4a87af7` | fork early error return | 25 | 待派发 |
 | 27 | `70e60fffbda9782a33dc284f91032fdedaa8fe96` | CLONE_PIDFD parent_tidptr validation | 26 | 待派发 |
