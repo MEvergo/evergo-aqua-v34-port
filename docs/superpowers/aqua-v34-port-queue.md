@@ -56,7 +56,7 @@
 | 42 | `5737cbe0f89cdb0f9f15e1ae804c6f7da39229ac` | map_files checkpoint capability | 39 | 已合入：`ae4e7eb9b341` |
 | 43 | `c7aa02fede4a47b1ba892b454a6fcfe97d04fab4` | prctl_set_mm permission refactor | — | 已合入：`dfe868e9e237`，保留旧权限检查与 auxv 的错误码优先级 |
 | 44 | `01f7e68b52c3f2a5e50a8153d2caa65851039009` | /proc/self/exe checkpoint capability | 39、43 | 已合入：`39a49046f8c4`；权限校验保留在 auxv 复制前 |
-| 45 | `150963f8969fb8b257a8af6721a333be23268523` | prctl exe error -EPERM | 44 | 处理中：AquaCommit45PrctlErrno |
+| 45 | `150963f8969fb8b257a8af6721a333be23268523` | prctl exe error -EPERM | 44 | 已合入：`7534f3ad0bb2`；auxv 复制之前拒绝返回 -EPERM |
 | 46 | `161299f028ca879642c4d85af8f8fd32f1989932` | clone3 checkpoint capability selftest | 38、40 | 待派发 |
 | 47 | `4c0d87767fb95c0dc201c5495f5102019baa0df3` | TIOCSLCKTRMIOS checkpoint capability | 39 | 已合入：`5afb6e3410e1` |
 | 48 | `d81fee89be1c86979a2421933a0741f55918cc44` | Enable WALT in everpal defconfig | 18 | 已合入：`9ce4a2b4ad44` |
