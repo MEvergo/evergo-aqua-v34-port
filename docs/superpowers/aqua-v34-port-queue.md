@@ -17,18 +17,18 @@
 | 03 | `5afd363a10c1e44187095efdabd3cafdd001e884` | binder: Fix 4.19 binder compilation on 4.14 | 02 | 已合入：`6a482eb6ddb6`，补足 eventpoll 头；其余适配已存在且保留 allocator 调试类别 |
 | 04 | `7042fefca96282acdaa6d1c89ff28eb59b5f3bb6` | netprio: use css ID instead of cgroup ID | — | 已合入：`6ba8e00c1d1a` |
 | 05 | `a184e7d6c259c73c66cc884f65a06e7891508cf8` | BPF-5.10 large import (one-parent, substantive) | 04 | 已合入：`7275a911666a`，855 条上游路径+两处 SukiSU hlist 适配；保留 6 处本地重叠 |
-| 06 | `2a866e985f5ee69dd2795860fe5f83f747a612d8` | cgroup ID access via kernfs node | 05 | 处理中：AquaCommit06CgroupId |
-| 07 | `71ceef5bb220e8718181ee583191f67f15cf7bf0` | kernfs inode attribute access | 05 | 处理中：AquaCommit07KernfsAttr |
-| 08 | `0e0433bce60876b0b417e0fd187ed6e2c15ca0e4` | MTK LPM kernfs_create_file arguments | 05、07 | 待派发 |
+| 06 | `2a866e985f5ee69dd2795860fe5f83f747a612d8` | cgroup ID access via kernfs node | 05 | 已合入：`8db92e04bb9b`，MTK 读取移至原有 RCU 范围内 |
+| 07 | `71ceef5bb220e8718181ee583191f67f15cf7bf0` | kernfs inode attribute access | 05 | 已合入：`6cbdbecd42c4` |
+| 08 | `0e0433bce60876b0b417e0fd187ed6e2c15ca0e4` | MTK LPM kernfs_create_file arguments | 05、07 | 处理中：AquaCommit08MtkLpm |
 | 09 | `fe798968a81f74e49e9eda6cf777e32950e5fc56` | Mali redundant __poll_t typedef | — | 已有等价实现：4.14 头文件未定义 `__poll_t`，保留局部兼容 typedef；删除会使 `reader_poll()` 无法编译，未改动源码 |
-| 10 | `e5efe77b90f2720465383603156f99b2e817c767` | Drop exit_umh inline; local caller must be resolved | 05 | 处理中：AquaCommit10ExitUmh |
-| 11 | `7b3a94ec99fc5ef73d811e0a01e29d2015ddbc8e` | Cortex-A76 compiler optimization | 05 | 处理中：AquaCommit11A76 |
+| 10 | `e5efe77b90f2720465383603156f99b2e817c767` | Drop exit_umh inline; local caller must be resolved | 05 | 已合入：`4db2333f3bf6`、`b243b3600ca0`；仅 USERMODE_DRIVER 启用时清理已注册驱动 |
+| 11 | `7b3a94ec99fc5ef73d811e0a01e29d2015ddbc8e` | Cortex-A76 compiler optimization | 05 | 已合入：`32f139228b71`，与上游 Makefile 标志一致 |
 | 12 | `0fdc8173e96f5d36597357305b4cbb6f0c319826` | Move stat attributes into vfs_getattr_nosec | — | 已合入：`f18f8abfbffd`，保留 SUSFS 提前返回属性 |
 | 13 | `04af80e5f5120a14503c0a8039e249fe33e474d2` | statx DAX attribute | 12 | 已合入：`35b56f571089`，后续 17 将修正属性位重叠 |
 | 14 | `c71cfde70ff87617fb8049d3c7cbac4e7f0215af` | Deprecate STATX_ALL | 13 | 已合入：`575a529d5178`，OrangeFS 显式保留原有掩码 |
 | 15 | `7c0b56ad9ab9d2c8e7f547b2a3b69f1c7a322274` | statx mount ID | 14 | 已合入：`ebbf9faef8e2`，SUSFS 复用既有挂载 ID 伪装 |
-| 16 | `0fd1ca0ee73e8c6ca280e2f2e1f000d5d755eaa0` | statx mount_root | 15 | 处理中：AquaCommit16StatxMountRoot |
-| 17 | `29a7465fd2653ea835d5cc1fc2961d744d4d97ce` | Fix DAX/MOUNT_ROOT attribute-bit overlap | 16 | 待派发 |
+| 16 | `0fd1ca0ee73e8c6ca280e2f2e1f000d5d755eaa0` | statx mount_root | 15 | 已合入：`97592d30891c`，不暴露 SUSFS 伪装挂载边界 |
+| 17 | `29a7465fd2653ea835d5cc1fc2961d744d4d97ce` | Fix DAX/MOUNT_ROOT attribute-bit overlap | 16 | 处理中：AquaCommit17StatxBit |
 | 18 | `5ab3aca066f999562b8b8a1e80f8fff546dd1321` | Remove Maple IO Scheduler | — | 已合入：`5e1395830391`，默认 CFQ |
 | 19 | `3fc2c50a33860a55370be83c22883ca34860be39` | modpost NOFAIL strndup | — | 已合入：`e4df607c0046`，目标文件与上游一致 |
 | 20 | `0aab45864e4950a0c05da0aa5d5e776d24b2c9cf` | modpost match() const qualifier | 19 | 已合入：`e18d05c39975` |
@@ -36,8 +36,8 @@
 | 22 | `afab5249b866ba2abe3b7ea6726c9a92a8d883e4` | x86 compat syscall macros | 21 | 已合入：`03df1bca365c`，对应迁移 15 个兼容系统调用入口 |
 | 23 | `da9a810b2c77de53ccb0798b0e8f5a3bfe35a867` | x86 compat clone entry | 22 | 已合入：`0d1c1077bcad` |
 | 24 | `412c5c2fd76ac1348931d5f712dea065d3f9ac0f` | x86 compat clone _do_fork | 23 | 已合入：`78c24ab2a571`，与上游代码一致 |
-| 25 | `fef4466bd4ae7aa2ec66d01f6a1bda57e5beb082` | pidfd creation and cleanup | 05 | 处理中：AquaCommit25Pidfd |
-| 26 | `ee66522755e6cef28769925bff19b565e4a87af7` | fork early error return | 25 | 待派发 |
+| 25 | `fef4466bd4ae7aa2ec66d01f6a1bda57e5beb082` | pidfd creation and cleanup | 05 | 已合入：`ae9c9204b718`，FD 安装延后至最后失败点后 |
+| 26 | `ee66522755e6cef28769925bff19b565e4a87af7` | fork early error return | 25 | 处理中：AquaCommit26ForkEarly |
 | 27 | `70e60fffbda9782a33dc284f91032fdedaa8fe96` | CLONE_PIDFD parent_tidptr validation | 26 | 待派发 |
 | 28 | `7084c333e121567533255371aa67f687b01ef5ff` | clone3 core and clone_args | 27、24 | 待派发 |
 | 29 | `38273f9fbd74be179f77106707bc2fc8a844b52b` | Wire clone3 syscall 435 | 28 | 待派发 |
