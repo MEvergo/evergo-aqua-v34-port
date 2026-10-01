@@ -49,7 +49,7 @@
 | 35 | `72dd3629520f194eba24240b6d8143f5f990fd5f` | CLONE_CLEAR_SIGHAND selftest | 34 | 已合入：`79aaefd10853` |
 | 36 | `a1ae3900cf263692ba599b7f720f6868165783ae` | clone3 base selftests | 35 | 已合入：`0f9420bcf884` |
 | 37 | `41abee1fff4bab468da9845c7e0318f5f7417cbd` | clone3 set_tid PID selection | 34 | 已合入：`53aed9e39f87`；修复上游未初始化 clone_args，保留 VER0/VER1 扩展校验 |
-| 38 | `050736f6dc5098359427233407a1d6afa0f4f0e1` | clone3 set_tid selftests | 36、37 | 处理中：AquaCommit38SetTidTest |
+| 38 | `050736f6dc5098359427233407a1d6afa0f4f0e1` | clone3 set_tid selftests | 36、37 | 已合入：`d5dd784199c5`、`6e79fe44c0ef`；子进程失败显式回传父进程 |
 | 39 | `2d2a57e68a5c8d6529efdaf5165945f1e8efeb38` | CAP_CHECKPOINT_RESTORE; include prerequisite CAP_PERFMON=38/CAP_BPF=39 and SELinux classmap entries | 05、37 | 已合入：`768a51e82cd0`；CAP_CHECKPOINT_RESTORE=40，SELinux cap2 顺序保持 |
 | 40 | `ff1d5976899fbb96aa5aec58a1da1f160df5a4a6` | set_tid checkpoint capability | 39 | 已合入：`03c453f87e14` |
 | 41 | `3545eccf9d6ec00ca8f05bfef814dc3afa2fc4a8` | ns_last_pid checkpoint capability | 39 | 已合入：`011568d8c606` |
@@ -57,7 +57,7 @@
 | 43 | `c7aa02fede4a47b1ba892b454a6fcfe97d04fab4` | prctl_set_mm permission refactor | — | 已合入：`dfe868e9e237`，保留旧权限检查与 auxv 的错误码优先级 |
 | 44 | `01f7e68b52c3f2a5e50a8153d2caa65851039009` | /proc/self/exe checkpoint capability | 39、43 | 已合入：`39a49046f8c4`；权限校验保留在 auxv 复制前 |
 | 45 | `150963f8969fb8b257a8af6721a333be23268523` | prctl exe error -EPERM | 44 | 已合入：`7534f3ad0bb2`；auxv 复制之前拒绝返回 -EPERM |
-| 46 | `161299f028ca879642c4d85af8f8fd32f1989932` | clone3 checkpoint capability selftest | 38、40 | 待派发 |
+| 46 | `161299f028ca879642c4d85af8f8fd32f1989932` | clone3 checkpoint capability selftest | 38、40 | 处理中：AquaCommit46CheckpointTest |
 | 47 | `4c0d87767fb95c0dc201c5495f5102019baa0df3` | TIOCSLCKTRMIOS checkpoint capability | 39 | 已合入：`5afb6e3410e1` |
 | 48 | `d81fee89be1c86979a2421933a0741f55918cc44` | Enable WALT in everpal defconfig | 18 | 已合入：`9ce4a2b4ad44` |
 
