@@ -20,7 +20,7 @@
 | 06 | `2a866e985f5ee69dd2795860fe5f83f747a612d8` | cgroup ID access via kernfs node | 05 | 已合入：`8db92e04bb9b`，MTK 读取移至原有 RCU 范围内 |
 | 07 | `71ceef5bb220e8718181ee583191f67f15cf7bf0` | kernfs inode attribute access | 05 | 已合入：`6cbdbecd42c4` |
 | 08 | `0e0433bce60876b0b417e0fd187ed6e2c15ca0e4` | MTK LPM kernfs_create_file arguments | 05、07 | 已合入：`30236ac670a5` |
-| 09 | `fe798968a81f74e49e9eda6cf777e32950e5fc56` | Mali redundant __poll_t typedef | — | 已有等价实现：4.14 头文件未定义 `__poll_t`，保留局部兼容 typedef；删除会使 `reader_poll()` 无法编译，未改动源码 |
+| 09 | `fe798968a81f74e49e9eda6cf777e32950e5fc56` | Mali redundant __poll_t typedef | 05 | 已合入：`9f2d6de169f9`；#05 导入 `include/uapi/linux/types.h` 定义后局部 typedef 重复，arm64 Mali 目标单独编译通过 |
 | 10 | `e5efe77b90f2720465383603156f99b2e817c767` | Drop exit_umh inline; local caller must be resolved | 05 | 已合入：`4db2333f3bf6`、`b243b3600ca0`；仅 USERMODE_DRIVER 启用时清理已注册驱动 |
 | 11 | `7b3a94ec99fc5ef73d811e0a01e29d2015ddbc8e` | Cortex-A76 compiler optimization | 05 | 已合入：`32f139228b71`，与上游 Makefile 标志一致 |
 | 12 | `0fdc8173e96f5d36597357305b4cbb6f0c319826` | Move stat attributes into vfs_getattr_nosec | — | 已合入：`f18f8abfbffd`，保留 SUSFS 提前返回属性 |
