@@ -84,6 +84,8 @@ int vfs_getattr_nosec(const struct path *path, struct kstat *stat,
 		stat->result_mask &= ~STATX_ATIME;
 	if (IS_AUTOMOUNT(inode))
 		stat->attributes |= STATX_ATTR_AUTOMOUNT;
+	if (IS_DAX(inode))
+		stat->attributes |= STATX_ATTR_DAX;
 
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 	if (susfs_is_current_app_uid()) {
