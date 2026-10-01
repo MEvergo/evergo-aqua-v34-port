@@ -1964,10 +1964,10 @@ static int prctl_set_mm_map(int opt, const void __user *addr, unsigned long data
 	if (prctl_map.exe_fd != (u32)-1) {
 		/*
 		 * Make sure the caller has the rights to
-		 * change /proc/pid/exe link: only local sys admin should
-		 * be allowed to.
+		 * change /proc/pid/exe link: checkpoint/restore
+		 * capability in the current user namespace is required.
 		 */
-		if (!ns_capable(current_user_ns(), CAP_SYS_ADMIN))
+		if (!checkpoint_restore_ns_capable(current_user_ns()))
 			return -EINVAL;
 	}
 
