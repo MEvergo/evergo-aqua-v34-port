@@ -32,7 +32,7 @@ static void test_clone3_supported(void)
 	args.exit_signal = -1;
 	pid = sys_clone3(&args, sizeof(args));
 	if (!pid)
-		exit(EXIT_SUCCESS);
+		_exit(EXIT_SUCCESS);
 
 	if (pid > 0) {
 		wait(NULL);
@@ -129,13 +129,13 @@ static void test_clone3_clear_sighand(void)
 	if (pid == 0) {
 		ret = sigaction(SIGUSR1, NULL, &act);
 		if (ret < 0 || act.sa_handler != SIG_DFL)
-			exit(EXIT_FAILURE);
+			_exit(EXIT_FAILURE);
 
 		ret = sigaction(SIGUSR2, NULL, &act);
 		if (ret < 0 || act.sa_handler != SIG_IGN)
-			exit(EXIT_FAILURE);
+			_exit(EXIT_FAILURE);
 
-		exit(EXIT_SUCCESS);
+		_exit(EXIT_SUCCESS);
 	}
 
 	ret = wait_for_pid(pid);
