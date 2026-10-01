@@ -46,8 +46,8 @@
 | 32 | `d32a118be5e77328057c18be352931d0b3bb1aed` | clone_args __ASSEMBLY__ guards | 28 | 已合入：`e22be4939bf9` |
 | 33 | `306a9638758d34039eb632779d42c2c170ca35e7` | clone_args kernel-doc | 32 | 已合入：`d916da60c6d1` |
 | 34 | `e363cc3a6ae4d9b214704e57dc8613e6fea5970d` | CLONE_CLEAR_SIGHAND | 31、33 | 已合入：`fd1b50747041`；copy_sighand u64 保留 32 位架构高位标志 |
-| 35 | `72dd3629520f194eba24240b6d8143f5f990fd5f` | CLONE_CLEAR_SIGHAND selftest | 34 | 处理中：AquaCommit35ClearSighandTest |
-| 36 | `a1ae3900cf263692ba599b7f720f6868165783ae` | clone3 base selftests | 35 | 待派发 |
+| 35 | `72dd3629520f194eba24240b6d8143f5f990fd5f` | CLONE_CLEAR_SIGHAND selftest | 34 | 已合入：`79aaefd10853` |
+| 36 | `a1ae3900cf263692ba599b7f720f6868165783ae` | clone3 base selftests | 35 | 处理中：AquaCommit36Clone3Test |
 | 37 | `41abee1fff4bab468da9845c7e0318f5f7417cbd` | clone3 set_tid PID selection | 34 | 处理中：AquaCommit37SetTid |
 | 38 | `050736f6dc5098359427233407a1d6afa0f4f0e1` | clone3 set_tid selftests | 36、37 | 待派发 |
 | 39 | `2d2a57e68a5c8d6529efdaf5165945f1e8efeb38` | CAP_CHECKPOINT_RESTORE; include prerequisite CAP_PERFMON=38/CAP_BPF=39 and SELinux classmap entries | 05、37 | 待派发 |
