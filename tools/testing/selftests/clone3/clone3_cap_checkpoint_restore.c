@@ -252,7 +252,7 @@ int main(void)
 	if (pid < 0) {
 		ksft_test_result_fail("fork() failed: %s\n", strerror(errno));
 		ksft_test_result_fail("fork() failed: %s\n", strerror(errno));
-		return ksft_exit_pass();
+		return ksft_get_fail_cnt() ? ksft_exit_fail() : ksft_exit_pass();
 	}
 	if (pid == 0)
 		_exit(run_capability_tests());
@@ -262,12 +262,12 @@ int main(void)
 			continue;
 		ksft_test_result_fail("waitpid() failed: %s\n", strerror(errno));
 		ksft_test_result_fail("waitpid() failed: %s\n", strerror(errno));
-		return ksft_exit_pass();
+		return ksft_get_fail_cnt() ? ksft_exit_fail() : ksft_exit_pass();
 	}
 	if (!WIFEXITED(status)) {
 		ksft_test_result_fail("capability test process did not exit\n");
 		ksft_test_result_fail("capability test process did not exit\n");
-		return ksft_exit_pass();
+		return ksft_get_fail_cnt() ? ksft_exit_fail() : ksft_exit_pass();
 	}
 
 	result = WEXITSTATUS(status);
@@ -295,5 +295,5 @@ int main(void)
 				"CAP_CHECKPOINT_RESTORE did not permit non-root requested PID selection\n");
 	}
 
-	return ksft_exit_pass();
+	return ksft_get_fail_cnt() ? ksft_exit_fail() : ksft_exit_pass();
 }
