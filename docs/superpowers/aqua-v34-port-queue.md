@@ -23,13 +23,13 @@
 | 09 | `fe798968a81f74e49e9eda6cf777e32950e5fc56` | Mali redundant __poll_t typedef | — | 已有等价实现：4.14 头文件未定义 `__poll_t`，保留局部兼容 typedef；删除会使 `reader_poll()` 无法编译，未改动源码 |
 | 10 | `e5efe77b90f2720465383603156f99b2e817c767` | Drop exit_umh inline; local caller must be resolved | 05 | 待派发 |
 | 11 | `7b3a94ec99fc5ef73d811e0a01e29d2015ddbc8e` | Cortex-A76 compiler optimization | 05 | 待派发 |
-| 12 | `0fdc8173e96f5d36597357305b4cbb6f0c319826` | Move stat attributes into vfs_getattr_nosec | — | 处理中：AquaCommit12StatAttrs |
-| 13 | `04af80e5f5120a14503c0a8039e249fe33e474d2` | statx DAX attribute | 12 | 待派发 |
+| 12 | `0fdc8173e96f5d36597357305b4cbb6f0c319826` | Move stat attributes into vfs_getattr_nosec | — | 已合入：`f18f8abfbffd`，保留 SUSFS 提前返回属性 |
+| 13 | `04af80e5f5120a14503c0a8039e249fe33e474d2` | statx DAX attribute | 12 | 处理中：AquaCommit13StatxDax |
 | 14 | `c71cfde70ff87617fb8049d3c7cbac4e7f0215af` | Deprecate STATX_ALL | 13 | 待派发 |
 | 15 | `7c0b56ad9ab9d2c8e7f547b2a3b69f1c7a322274` | statx mount ID | 14 | 待派发 |
 | 16 | `0fd1ca0ee73e8c6ca280e2f2e1f000d5d755eaa0` | statx mount_root | 15 | 待派发 |
 | 17 | `29a7465fd2653ea835d5cc1fc2961d744d4d97ce` | Fix DAX/MOUNT_ROOT attribute-bit overlap | 16 | 待派发 |
-| 18 | `5ab3aca066f999562b8b8a1e80f8fff546dd1321` | Remove Maple IO Scheduler | — | 处理中：AquaCommit18Maple |
+| 18 | `5ab3aca066f999562b8b8a1e80f8fff546dd1321` | Remove Maple IO Scheduler | — | 已合入：`5e1395830391`，默认 CFQ |
 | 19 | `3fc2c50a33860a55370be83c22883ca34860be39` | modpost NOFAIL strndup | — | 已合入：`e4df607c0046`，目标文件与上游一致 |
 | 20 | `0aab45864e4950a0c05da0aa5d5e776d24b2c9cf` | modpost match() const qualifier | 19 | 处理中：AquaCommit20ModpostConst |
 | 21 | `a3970ca73e102de6912deb3c84a8b4d4dcf11511` | Remove stale x86 syscall prototype | — | 已合入：`a83e33309492` |
@@ -59,6 +59,6 @@
 | 45 | `150963f8969fb8b257a8af6721a333be23268523` | prctl exe error -EPERM | 44 | 待派发 |
 | 46 | `161299f028ca879642c4d85af8f8fd32f1989932` | clone3 checkpoint capability selftest | 38、40 | 待派发 |
 | 47 | `4c0d87767fb95c0dc201c5495f5102019baa0df3` | TIOCSLCKTRMIOS checkpoint capability | 39 | 待派发 |
-| 48 | `d81fee89be1c86979a2421933a0741f55918cc44` | Enable WALT in everpal defconfig | 18 | 待派发 |
+| 48 | `d81fee89be1c86979a2421933a0741f55918cc44` | Enable WALT in everpal defconfig | 18 | 处理中：AquaCommit48WaltConfig |
 
 第一批候选：**01、02、04、09**（上游 diff 的路径集合两两不交集）。下一批依赖实际集成和冲突报告决定，绝不因为后续提交存在就假定复杂前置提交已成功。首次私有备份与最后一次内核构建由控制者验证，不由 subagent 宣称成功。
