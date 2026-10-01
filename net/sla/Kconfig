@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: GPL-2.0
+#
+# QTI Smart Link Aggregation statistics collector.
+# In-kernel (built-in) build of the vendor sla.ko module.
+#
+menu "SLA Configuration"
+	depends on NET && INET && NETFILTER
+
+config SLA_STAIC_COLLECT
+	bool "SLA Statistics collector"
+	depends on NETFILTER
+	---help---
+	  QTI Smart Link Aggregation for Web Browsing.
+
+	  Collects per-interface TCP traffic statistics under /proc/sla
+	  using a netfilter pre-routing/post-routing hook pair, and exposes
+	  the reconstructed stock VoIP UDP capture state through
+	  /proc/sla/sla_voip_state.
+
+	  This is the in-kernel build of the vendor sla.ko module
+	  (GPL-2.0 QTI ancestor + reconstructed VoIP extension).
+
+	  Enable this only on targets whose vendor init loads the vendor
+	  sla.ko module (e.g. evergo/mt6833); it is not selected by default.
+	  If unsure, say N.
+
+endmenu

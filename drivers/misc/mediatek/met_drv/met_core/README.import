@@ -1,0 +1,67 @@
+MediaTek MET_CORE (met_drv) - vendored in-tree for built-in linking
+====================================================================
+
+These sources are the MediaTek MET (Mobile Enhancement Technology) driver
+core, version MET_BACKEND_VERSION "6.2.0", vendored into the kernel tree so
+the MET broker (../met_api.c) and the real driver core link into the same
+vmlinux via CONFIG_MTK_MET_BUILT_IN.
+
+Provenance
+----------
+  Upstream repository : https://github.com/rabbit-hmi-oss/android_kernel_modules_rabbit_mt6765
+  Pinned commit       : 0afdf059a0dfa17becc4bbe47363280a42224c2f
+  Upstream path       : met_drv/4.14
+  License             : GPL-2.0 (per-file "GNU General Public License version 2")
+  Local mirror        : kernel/evergo-sukisu-susfs-nomount/src/mt6833-met-modules/met_drv/4.14
+
+Only the mt6833 platform directory, the "common" core and the platform
+feature descriptor are vendored. Build artifacts (*.o, .*.cmd, *.d,
+*.symversions), the vendor "default" fallback stub core (never reachable:
+a missing platform directory is a hard build error here) and the mt6739/
+mt6768/mt6781/mt6785/mt6853/mt6873/mt6877/mt6885/mt6893 platform
+directories were not copied.
+
+Vendored layout
+---------------
+  met_core/common/            MET core (sampler, tag, EMI, GPU, thermal, ...)
+  met_core/common/emi/...     EMI bandwidth monitors (SEDA3_5 selected)
+  met_core/common/sspm/...    on-die MET SSPM backend
+  met_core/common/tinysys/v1/ tinysys (SSPM + MCUPM) logging backends
+  met_core/mt6833/            platform feature descriptor + register data
+
+Platform selection
+------------------
+The everpal device is MT6833 while CONFIG_MTK_PLATFORM names the mt6853
+driver family. The parent Makefile therefore overrides MTK_PLATFORM to
+mt6833 from CONFIG_MACH_MT6833, matching the vendor Makefile. Because this
+tree ships only met_core/mt6833, a missing platform directory is a hard
+build error instead of a silent fallback, so a wrong/partial feature set
+cannot be selected.
+
+Local changes relative to the pinned upstream commit
+----------------------------------------------------
+1. common/Kbuild: "obj-y := met.o" -> "obj-y += met.o" in the built-in
+   branch so met_api.o (added to obj-y by ../Makefile) is not dropped.
+   "MET_CORE := common" -> "MET_CORE ?= common" so the in-tree build can set
+   the met_core/-prefixed object paths.
+2. Added "(void)" prototypes to 12 K&R-style empty-parameter definitions
+   rejected by clang -Werror=strict-prototypes (kernel Makefile:1004):
+     common/emi/SEDA3_5/mtk_emi_bm.c: MET_GET_DRAM_TYPE()
+     common/tinysys/v1/mcupm/mcupm_met_ipi_handle.c: start/stop_mcupm_ipi_recv_thread()
+     common/tinysys/v1/sspm/sspm_met_ipi_handle.c: start/stop_sspm_ipi_recv_thread()
+     common/tinysys/v1/tinysys_mgr.c: ondiemet_log_manager_start/stop,
+         ondiemet_start/stop/extract, _remove_mcupm_node
+     common/v7_pmu_hw.c: armv7_pmu_disable_cyc_intr()  (arm-only build path)
+3. Header search order: the kernel's drivers/misc/mediatek/include/mt-plat/
+   met_drv.h shares the MET_DRV include guard with common/met_drv.h. In a
+   full Image build the kernel copy was resolved first for metk_emi_bm.h and
+   friends, hiding the donor's MET_TRACE. ../Makefile now prepends this
+   directory to LINUXINCLUDE so the vendor header wins; no source change.
+4. Renamed the MET-local tracing_mark_write() helper to
+   met_tracing_mark_write() (definition in common/met_tag_ex.c, extern in
+   common/met_tag.h, callers in common/sampler.c). The unrelated global
+   tracing_mark_write(const char *) in drivers/mailbox/mtk-cmdq-mailbox.c
+   would otherwise be a duplicate vmlinux symbol once MET_CORE is built-in
+   instead of a separate met.ko.
+
+No functional behavior was changed by these edits.

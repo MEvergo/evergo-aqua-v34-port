@@ -1,0 +1,38 @@
+// SPDX-License-Identifier: GPL-2.0
+/dts-v1/;
+/plugin/;
+/* Keep the values in sync with mt6833-mali-cma.dtsi. This old dtc
+ * requires explicit target-path fragments for the boot-image FDT.
+ */
+/ {
+	fragment@0 {
+		target-path = "/reserved-memory";
+		__overlay__ {
+			mali_cma: mali-cma {
+				compatible = "mediatek,mali-cma", "shared-dma-pool";
+				reusable;
+				size = <0 0x02000000>;
+				alignment = <0 0x00400000>;
+				alloc-ranges = <0 0xc0000000 4 0x00000000>;
+			};
+		};
+	};
+
+	fragment@1 {
+		target-path = "/mali@13000000";
+		__overlay__ {
+			physical-memory-group-manager = <&mali_cma_mgm>;
+		};
+	};
+
+	fragment@2 {
+		target-path = "/";
+		__overlay__ {
+			mali_cma_mgm: mali-cma-mgm {
+				compatible = "mediatek,mali-cma-mgm",
+					     "arm,physical-memory-group-manager";
+				memory-region = <&mali_cma>;
+			};
+		};
+	};
+};

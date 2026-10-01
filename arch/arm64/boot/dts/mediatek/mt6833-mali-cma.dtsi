@@ -1,0 +1,25 @@
+/* SPDX-License-Identifier: GPL-2.0 */
+/* Trial size only: select the final capacity after on-device stress. */
+/ { };
+
+&{/reserved-memory} {
+	mali_cma: mali-cma {
+		compatible = "mediatek,mali-cma", "shared-dma-pool";
+		reusable;
+		size = <0 0x02000000>;
+		alignment = <0 0x00400000>;
+		alloc-ranges = <0 0xc0000000 4 0x00000000>;
+	};
+};
+
+&{/mali@13000000} {
+	physical-memory-group-manager = <&mali_cma_mgm>;
+};
+
+/ {
+	mali_cma_mgm: mali-cma-mgm {
+		compatible = "mediatek,mali-cma-mgm",
+			     "arm,physical-memory-group-manager";
+		memory-region = <&mali_cma>;
+	};
+};

@@ -1,0 +1,23 @@
+config MTK_MET_BUILT_IN
+	bool "Build MediaTek MET_CORE into the kernel (met_drv built-in)"
+	depends on MEDIATEK_SOLUTION
+	depends on FTRACE
+	depends on TRACING
+	default n
+	help
+	  Link the MediaTek MET (Mobile Enhancement Technology) driver core
+	  in-tree into vmlinux together with the met_api broker that always
+	  builds as obj-y in this directory.
+
+	  This makes met_api.o provide the real MET_ext_api callbacks
+	  (met_tag_start, met_tag_oneshot, ...) that in-kernel users such as
+	  cmdq, mdp, ccmni, cpufreq and gpu/ged call through
+	  include/mt-plat/met_drv.h, instead of the no-op stubs used only
+	  for the loadable met.ko path.
+
+	  The core sources live in drivers/misc/mediatek/met_drv/met_core
+	  (MediaTek MET_BACKEND_VERSION 6.2.0, GPL-2.0). The build selects
+	  met_core/mt6833 from CONFIG_MACH_MT6833, matching the everpal
+	  device even though CONFIG_MTK_PLATFORM names the mt6853 family.
+
+	  If unsure, say N.
