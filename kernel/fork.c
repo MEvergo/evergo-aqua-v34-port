@@ -2510,6 +2510,14 @@ SYSCALL_DEFINE2(clone3, struct clone_args __user *, uargs, size_t, size)
 
 	return _do_fork(&kargs);
 }
+
+#ifdef CONFIG_COMPAT
+COMPAT_SYSCALL_DEFINE2(clone3, struct clone_args __user *, uargs,
+		       compat_size_t, size)
+{
+	return sys_clone3(uargs, size);
+}
+#endif
 #endif
 
 void walk_process_tree(struct task_struct *top, proc_visitor visitor, void *data)
