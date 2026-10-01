@@ -921,8 +921,10 @@ void __noreturn do_exit(long code)
 	exit_task_namespaces(tsk);
 	exit_task_work(tsk);
 	exit_thread(tsk);
+#ifdef CONFIG_USERMODE_DRIVER
 	if (group_dead && unlikely(tsk->flags & PF_UMH))
 		__exit_umh(tsk);
+#endif
 
 	/*
 	 * Flush inherited counters to the parent - before the parent
