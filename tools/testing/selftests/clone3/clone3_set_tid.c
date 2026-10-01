@@ -28,6 +28,16 @@
 #define MAX_PID_NS_LEVEL 32
 #endif
 
+/*
+ * The nested child reports result deltas in wait status: bit 7 marks a
+ * valid result, bits 0-2 contain passes, and bits 3-5 contain failures.
+ */
+#define NS_CHILD_RESULT_VALID		0x80
+#define NS_CHILD_RESULT_RESERVED	0x40
+#define NS_CHILD_RESULT_COUNT_MASK	0x07
+#define NS_CHILD_RESULT_FAIL_SHIFT	3
+#define NS_CHILD_TEST_COUNT		4
+
 static int pipe_1[2];
 static int pipe_2[2];
 
@@ -216,13 +226,14 @@ int main(void)
 	FILE *f;
 	char buf;
 	char *line = NULL;
-	int status;
+	int status, child_result;
 	size_t len = 0;
 	int pid_max = 0;
 	uid_t uid = getuid();
 	char proc_path[100] = {0};
 	pid_t pid, ns1 = 0, ns2 = 0, ns3 = 0, ns_pid;
 	pid_t set_tid[MAX_PID_NS_LEVEL * 2];
+	int pass_count_before_ns, fail_count_before_ns;
 
 	if (pipe(pipe_1) < 0 || pipe(pipe_2) < 0)
 		ksft_exit_fail_msg("pipe() failed\n");
@@ -368,6 +379,8 @@ int main(void)
 	test_clone3_set_tid(set_tid, 1, 0, -EINVAL, 0, 0);
 
 	/* Let's create a PID 1 */
+	pass_count_before_ns = ksft_get_pass_cnt();
+	fail_count_before_ns = ksft_get_fail_cnt();
 	ns_pid = fork();
 	if (ns_pid < 0) {
 		ksft_test_result_fail("fork() failed: %s\n", strerror(errno));
@@ -400,7 +413,10 @@ int main(void)
 		 */
 		test_clone3_set_tid(set_tid, 3, CLONE_NEWPID, 0, 42, true);
 
-		_exit(ksft_cnt.ksft_pass);
+		_exit(NS_CHILD_RESULT_VALID |
+		      ((ksft_get_fail_cnt() - fail_count_before_ns) <<
+		       NS_CHILD_RESULT_FAIL_SHIFT) |
+		      (ksft_get_pass_cnt() - pass_count_before_ns));
 	}
 
 	close(pipe_1[1]);
@@ -452,12 +468,21 @@ int main(void)
 		goto out;
 	}
 
-	if (WEXITSTATUS(status))
-		/*
-		 * Update the number of total tests with the tests from the
-		 * child processes.
-		 */
-		ksft_cnt.ksft_pass = WEXITSTATUS(status);
+	child_result = WEXITSTATUS(status);
+	if (!(child_result & NS_CHILD_RESULT_VALID) ||
+	    (child_result & NS_CHILD_RESULT_RESERVED) ||
+	    ((child_result & NS_CHILD_RESULT_COUNT_MASK) +
+	     ((child_result >> NS_CHILD_RESULT_FAIL_SHIFT) &
+	      NS_CHILD_RESULT_COUNT_MASK) != NS_CHILD_TEST_COUNT)) {
+		ksft_test_result_fail("Invalid nested test result %#x\n",
+				      child_result);
+		goto out;
+	}
+
+	ksft_cnt.ksft_pass += child_result & NS_CHILD_RESULT_COUNT_MASK;
+	ksft_cnt.ksft_fail +=
+		(child_result >> NS_CHILD_RESULT_FAIL_SHIFT) &
+		NS_CHILD_RESULT_COUNT_MASK;
 
 	if (ns3 == pid && ns2 == 42 && ns1 == 1)
 		ksft_test_result_pass(
