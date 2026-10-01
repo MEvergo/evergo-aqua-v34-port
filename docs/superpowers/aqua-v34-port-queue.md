@@ -38,8 +38,8 @@
 | 24 | `412c5c2fd76ac1348931d5f712dea065d3f9ac0f` | x86 compat clone _do_fork | 23 | 已合入：`78c24ab2a571`，与上游代码一致 |
 | 25 | `fef4466bd4ae7aa2ec66d01f6a1bda57e5beb082` | pidfd creation and cleanup | 05 | 已合入：`ae9c9204b718`，FD 安装延后至最后失败点后 |
 | 26 | `ee66522755e6cef28769925bff19b565e4a87af7` | fork early error return | 25 | 已合入：`bcf054fdaeb9`，保留 cpufreq→trace 和 MGLRU 顺序 |
-| 27 | `70e60fffbda9782a33dc284f91032fdedaa8fe96` | CLONE_PIDFD parent_tidptr validation | 26 | 处理中：AquaCommit27PidfdValidation |
-| 28 | `7084c333e121567533255371aa67f687b01ef5ff` | clone3 core and clone_args | 27、24 | 待派发 |
+| 27 | `70e60fffbda9782a33dc284f91032fdedaa8fe96` | CLONE_PIDFD parent_tidptr validation | 26 | 已合入：`9b9a0937ce18` |
+| 28 | `7084c333e121567533255371aa67f687b01ef5ff` | clone3 core and clone_args | 27、24 | 处理中：AquaCommit28Clone3Core |
 | 29 | `38273f9fbd74be179f77106707bc2fc8a844b52b` | Wire clone3 syscall 435 | 28 | 待派发 |
 | 30 | `7ed966f471a802cfc8156f2513e7995a885f7a74` | Unsupported-arch clone3 guards | 29 | 待派发 |
 | 31 | `12f2b25517ca85edad063f480d8f3e6be8f27c5d` | Legacy CLONE_PIDFD with clone3 | 30 | 待派发 |
