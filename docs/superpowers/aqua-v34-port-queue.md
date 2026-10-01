@@ -39,11 +39,11 @@
 | 25 | `fef4466bd4ae7aa2ec66d01f6a1bda57e5beb082` | pidfd creation and cleanup | 05 | 已合入：`ae9c9204b718`，FD 安装延后至最后失败点后 |
 | 26 | `ee66522755e6cef28769925bff19b565e4a87af7` | fork early error return | 25 | 已合入：`bcf054fdaeb9`，保留 cpufreq→trace 和 MGLRU 顺序 |
 | 27 | `70e60fffbda9782a33dc284f91032fdedaa8fe96` | CLONE_PIDFD parent_tidptr validation | 26 | 已合入：`9b9a0937ce18` |
-| 28 | `7084c333e121567533255371aa67f687b01ef5ff` | clone3 core and clone_args | 27、24 | 处理中：AquaCommit28Clone3Core |
-| 29 | `38273f9fbd74be179f77106707bc2fc8a844b52b` | Wire clone3 syscall 435 | 28 | 待派发 |
+| 28 | `7084c333e121567533255371aa67f687b01ef5ff` | clone3 core and clone_args | 27、24 | 已合入：`39257675eba0`，补足 x86 compat/do_fork 的 legacy PIDFD 指针和冲突校验 |
+| 29 | `38273f9fbd74be179f77106707bc2fc8a844b52b` | Wire clone3 syscall 435 | 28 | 处理中：AquaCommit29Clone3Wire |
 | 30 | `7ed966f471a802cfc8156f2513e7995a885f7a74` | Unsupported-arch clone3 guards | 29 | 待派发 |
 | 31 | `12f2b25517ca85edad063f480d8f3e6be8f27c5d` | Legacy CLONE_PIDFD with clone3 | 30 | 待派发 |
-| 32 | `d32a118be5e77328057c18be352931d0b3bb1aed` | clone_args __ASSEMBLY__ guards | 28 | 待派发 |
+| 32 | `d32a118be5e77328057c18be352931d0b3bb1aed` | clone_args __ASSEMBLY__ guards | 28 | 处理中：AquaCommit32AssemblyGuard |
 | 33 | `306a9638758d34039eb632779d42c2c170ca35e7` | clone_args kernel-doc | 32 | 待派发 |
 | 34 | `e363cc3a6ae4d9b214704e57dc8613e6fea5970d` | CLONE_CLEAR_SIGHAND | 31、33 | 待派发 |
 | 35 | `72dd3629520f194eba24240b6d8143f5f990fd5f` | CLONE_CLEAR_SIGHAND selftest | 34 | 待派发 |
