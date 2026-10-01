@@ -44,7 +44,7 @@
 | 30 | `7ed966f471a802cfc8156f2513e7995a885f7a74` | Unsupported-arch clone3 guards | 29 | 待派发 |
 | 31 | `12f2b25517ca85edad063f480d8f3e6be8f27c5d` | Legacy CLONE_PIDFD with clone3 | 30 | 待派发 |
 | 32 | `d32a118be5e77328057c18be352931d0b3bb1aed` | clone_args __ASSEMBLY__ guards | 28 | 已合入：`e22be4939bf9` |
-| 33 | `306a9638758d34039eb632779d42c2c170ca35e7` | clone_args kernel-doc | 32 | 处理中：AquaCommit33CloneArgsDocs |
+| 33 | `306a9638758d34039eb632779d42c2c170ca35e7` | clone_args kernel-doc | 32 | 已合入：`d916da60c6d1` |
 | 34 | `e363cc3a6ae4d9b214704e57dc8613e6fea5970d` | CLONE_CLEAR_SIGHAND | 31、33 | 待派发 |
 | 35 | `72dd3629520f194eba24240b6d8143f5f990fd5f` | CLONE_CLEAR_SIGHAND selftest | 34 | 待派发 |
 | 36 | `a1ae3900cf263692ba599b7f720f6868165783ae` | clone3 base selftests | 35 | 待派发 |
