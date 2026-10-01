@@ -35,7 +35,7 @@
 | 21 | `a3970ca73e102de6912deb3c84a8b4d4dcf11511` | Remove stale x86 syscall prototype | — | 已合入：`a83e33309492` |
 | 22 | `afab5249b866ba2abe3b7ea6726c9a92a8d883e4` | x86 compat syscall macros | 21 | 已合入：`03df1bca365c`，对应迁移 15 个兼容系统调用入口 |
 | 23 | `da9a810b2c77de53ccb0798b0e8f5a3bfe35a867` | x86 compat clone entry | 22 | 已合入：`0d1c1077bcad` |
-| 24 | `412c5c2fd76ac1348931d5f712dea065d3f9ac0f` | x86 compat clone _do_fork | 23 | 处理中：AquaCommit24X86DoFork |
+| 24 | `412c5c2fd76ac1348931d5f712dea065d3f9ac0f` | x86 compat clone _do_fork | 23 | 已合入：`78c24ab2a571`，与上游代码一致 |
 | 25 | `fef4466bd4ae7aa2ec66d01f6a1bda57e5beb082` | pidfd creation and cleanup | 05 | 待派发 |
 | 26 | `ee66522755e6cef28769925bff19b565e4a87af7` | fork early error return | 25 | 待派发 |
 | 27 | `70e60fffbda9782a33dc284f91032fdedaa8fe96` | CLONE_PIDFD parent_tidptr validation | 26 | 待派发 |
