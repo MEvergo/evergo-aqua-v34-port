@@ -11,10 +11,10 @@
 #define KSU_LSM_HOOK_HEADS_TYPE struct security_hook_heads
 #endif
 
-// Upstream kernels before 4.17 used plain list_head chains. Vendor 4.14
-// trees may backport security_hook_list metadata; the legacy implementation
-// intentionally relies only on the list and callback fields.
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 17, 0)
+/* Upstream before 4.17 used list_head chains. Vendor trees can backport
+ * hlist-based LSM hooks without changing LINUX_VERSION_CODE.
+ */
+#if LINUX_VERSION_CODE >= KERNEL_VERSION(4, 17, 0) || defined(LSM_HOOKS_HLIST)
 #define KSU_LSM_HOOK_ENTRY_LIST_TYPE hlist
 #define KSU_LSM_HAVE_ENTRY_LSM 1
 #else

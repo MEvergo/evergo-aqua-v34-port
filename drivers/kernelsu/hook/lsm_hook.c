@@ -87,7 +87,7 @@ static int ksu_lsm_hook_update_scall(struct lsm_static_call *scall, void *value)
 int ksu_lsm_hook(struct ksu_lsm_hook *hook)
 {
     int ret = 0;
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 17, 0)
+#if !KSU_LSM_HAVE_ENTRY_LSM
     int patch_ret, rollback_ret;
 #endif
     struct security_hook_list *entry;
@@ -110,8 +110,8 @@ int ksu_lsm_hook(struct ksu_lsm_hook *hook)
     void **selected_slot = NULL;
     void *selected_origin = NULL;
 #else
-    // 4.14/4.16 uses plain list_head chains; resolve its requested head
-    // directly from the linked security_hook_heads object.
+    // Legacy list-based LSM layout; resolve its requested head directly from
+    // the linked security_hook_heads object.
     unsigned long heads_addr;
     struct list_head *head;
     struct security_hook_list *selected_entry = NULL;
@@ -288,16 +288,20 @@ int ksu_lsm_hook(struct ksu_lsm_hook *hook)
     pr_info("lsm_hook: patched %s hook slot %px from %px to %px\n", hook->head_name ?: "unknown", selected_slot,
             selected_origin, hook->replacement);
 #elif KSU_LSM_HAVE_ENTRY_LSM
+    unsigned long heads_size = sizeof(struct security_hook_heads);
+#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 17, 0) && defined(LSM_HOOKS_HLIST)
+    heads_addr = (unsigned long)&security_hook_heads;
+#else
     heads_addr = find_kernel_symbol_exact("security_hook_heads");
     if (!heads_addr) {
         pr_err("lsm_hook: failed to resolve security_hook_heads\n");
         ret = -ENOENT;
         goto out_unlock;
     }
-    unsigned long heads_size = sizeof(struct security_hook_heads);
     if (!kallsyms_lookup_size_offset(heads_addr, &heads_size, NULL)) {
         pr_warn("lookup head size failed");
     }
+#endif
 
     head = (struct hlist_head *)heads_addr;
     struct hlist_head *head_end = (struct hlist_head *)(heads_addr + heads_size);
