@@ -30,10 +30,10 @@
 | 16 | `0fd1ca0ee73e8c6ca280e2f2e1f000d5d755eaa0` | statx mount_root | 15 | 待派发 |
 | 17 | `29a7465fd2653ea835d5cc1fc2961d744d4d97ce` | Fix DAX/MOUNT_ROOT attribute-bit overlap | 16 | 待派发 |
 | 18 | `5ab3aca066f999562b8b8a1e80f8fff546dd1321` | Remove Maple IO Scheduler | — | 处理中：AquaCommit18Maple |
-| 19 | `3fc2c50a33860a55370be83c22883ca34860be39` | modpost NOFAIL strndup | — | 处理中：AquaCommit19Modpost |
-| 20 | `0aab45864e4950a0c05da0aa5d5e776d24b2c9cf` | modpost match() const qualifier | 19 | 待派发 |
-| 21 | `a3970ca73e102de6912deb3c84a8b4d4dcf11511` | Remove stale x86 syscall prototype | — | 处理中：AquaCommit21X86Prototype |
-| 22 | `afab5249b866ba2abe3b7ea6726c9a92a8d883e4` | x86 compat syscall macros | 21 | 待派发 |
+| 19 | `3fc2c50a33860a55370be83c22883ca34860be39` | modpost NOFAIL strndup | — | 已合入：`e4df607c0046`，目标文件与上游一致 |
+| 20 | `0aab45864e4950a0c05da0aa5d5e776d24b2c9cf` | modpost match() const qualifier | 19 | 处理中：AquaCommit20ModpostConst |
+| 21 | `a3970ca73e102de6912deb3c84a8b4d4dcf11511` | Remove stale x86 syscall prototype | — | 已合入：`a83e33309492` |
+| 22 | `afab5249b866ba2abe3b7ea6726c9a92a8d883e4` | x86 compat syscall macros | 21 | 处理中：AquaCommit22X86Compat |
 | 23 | `da9a810b2c77de53ccb0798b0e8f5a3bfe35a867` | x86 compat clone entry | 22 | 待派发 |
 | 24 | `412c5c2fd76ac1348931d5f712dea065d3f9ac0f` | x86 compat clone _do_fork | 23 | 待派发 |
 | 25 | `fef4466bd4ae7aa2ec66d01f6a1bda57e5beb082` | pidfd creation and cleanup | 05 | 待派发 |
