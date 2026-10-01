@@ -26,8 +26,8 @@
 | 12 | `0fdc8173e96f5d36597357305b4cbb6f0c319826` | Move stat attributes into vfs_getattr_nosec | — | 已合入：`f18f8abfbffd`，保留 SUSFS 提前返回属性 |
 | 13 | `04af80e5f5120a14503c0a8039e249fe33e474d2` | statx DAX attribute | 12 | 已合入：`35b56f571089`，后续 17 将修正属性位重叠 |
 | 14 | `c71cfde70ff87617fb8049d3c7cbac4e7f0215af` | Deprecate STATX_ALL | 13 | 已合入：`575a529d5178`，OrangeFS 显式保留原有掩码 |
-| 15 | `7c0b56ad9ab9d2c8e7f547b2a3b69f1c7a322274` | statx mount ID | 14 | 处理中：AquaCommit15StatxMountId |
-| 16 | `0fd1ca0ee73e8c6ca280e2f2e1f000d5d755eaa0` | statx mount_root | 15 | 待派发 |
+| 15 | `7c0b56ad9ab9d2c8e7f547b2a3b69f1c7a322274` | statx mount ID | 14 | 已合入：`ebbf9faef8e2`，SUSFS 复用既有挂载 ID 伪装 |
+| 16 | `0fd1ca0ee73e8c6ca280e2f2e1f000d5d755eaa0` | statx mount_root | 15 | 处理中：AquaCommit16StatxMountRoot |
 | 17 | `29a7465fd2653ea835d5cc1fc2961d744d4d97ce` | Fix DAX/MOUNT_ROOT attribute-bit overlap | 16 | 待派发 |
 | 18 | `5ab3aca066f999562b8b8a1e80f8fff546dd1321` | Remove Maple IO Scheduler | — | 已合入：`5e1395830391`，默认 CFQ |
 | 19 | `3fc2c50a33860a55370be83c22883ca34860be39` | modpost NOFAIL strndup | — | 已合入：`e4df607c0046`，目标文件与上游一致 |
