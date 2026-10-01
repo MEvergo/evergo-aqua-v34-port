@@ -16,23 +16,23 @@
 | 02 | `28123b05c48f3a3f68bd2880799d163817510b1d` | binder: Checkout to android-4.19-stable | — | 处理中：AquaCommit02Binder419 |
 | 03 | `5afd363a10c1e44187095efdabd3cafdd001e884` | binder: Fix 4.19 binder compilation on 4.14 | 02 | 待派发 |
 | 04 | `7042fefca96282acdaa6d1c89ff28eb59b5f3bb6` | netprio: use css ID instead of cgroup ID | — | 已合入：`6ba8e00c1d1a` |
-| 05 | `a184e7d6c259c73c66cc884f65a06e7891508cf8` | BPF-5.10 large import (one-parent, substantive) | 04 | 待派发 |
+| 05 | `a184e7d6c259c73c66cc884f65a06e7891508cf8` | BPF-5.10 large import (one-parent, substantive) | 04 | 处理中：AquaCommit05BpfImport |
 | 06 | `2a866e985f5ee69dd2795860fe5f83f747a612d8` | cgroup ID access via kernfs node | 05 | 待派发 |
 | 07 | `71ceef5bb220e8718181ee583191f67f15cf7bf0` | kernfs inode attribute access | 05 | 待派发 |
 | 08 | `0e0433bce60876b0b417e0fd187ed6e2c15ca0e4` | MTK LPM kernfs_create_file arguments | 05、07 | 待派发 |
 | 09 | `fe798968a81f74e49e9eda6cf777e32950e5fc56` | Mali redundant __poll_t typedef | — | 已有等价实现：4.14 头文件未定义 `__poll_t`，保留局部兼容 typedef；删除会使 `reader_poll()` 无法编译，未改动源码 |
 | 10 | `e5efe77b90f2720465383603156f99b2e817c767` | Drop exit_umh inline; local caller must be resolved | 05 | 待派发 |
 | 11 | `7b3a94ec99fc5ef73d811e0a01e29d2015ddbc8e` | Cortex-A76 compiler optimization | 05 | 待派发 |
-| 12 | `0fdc8173e96f5d36597357305b4cbb6f0c319826` | Move stat attributes into vfs_getattr_nosec | — | 待派发 |
+| 12 | `0fdc8173e96f5d36597357305b4cbb6f0c319826` | Move stat attributes into vfs_getattr_nosec | — | 处理中：AquaCommit12StatAttrs |
 | 13 | `04af80e5f5120a14503c0a8039e249fe33e474d2` | statx DAX attribute | 12 | 待派发 |
 | 14 | `c71cfde70ff87617fb8049d3c7cbac4e7f0215af` | Deprecate STATX_ALL | 13 | 待派发 |
 | 15 | `7c0b56ad9ab9d2c8e7f547b2a3b69f1c7a322274` | statx mount ID | 14 | 待派发 |
 | 16 | `0fd1ca0ee73e8c6ca280e2f2e1f000d5d755eaa0` | statx mount_root | 15 | 待派发 |
 | 17 | `29a7465fd2653ea835d5cc1fc2961d744d4d97ce` | Fix DAX/MOUNT_ROOT attribute-bit overlap | 16 | 待派发 |
-| 18 | `5ab3aca066f999562b8b8a1e80f8fff546dd1321` | Remove Maple IO Scheduler | — | 待派发 |
-| 19 | `3fc2c50a33860a55370be83c22883ca34860be39` | modpost NOFAIL strndup | — | 待派发 |
+| 18 | `5ab3aca066f999562b8b8a1e80f8fff546dd1321` | Remove Maple IO Scheduler | — | 处理中：AquaCommit18Maple |
+| 19 | `3fc2c50a33860a55370be83c22883ca34860be39` | modpost NOFAIL strndup | — | 处理中：AquaCommit19Modpost |
 | 20 | `0aab45864e4950a0c05da0aa5d5e776d24b2c9cf` | modpost match() const qualifier | 19 | 待派发 |
-| 21 | `a3970ca73e102de6912deb3c84a8b4d4dcf11511` | Remove stale x86 syscall prototype | — | 待派发 |
+| 21 | `a3970ca73e102de6912deb3c84a8b4d4dcf11511` | Remove stale x86 syscall prototype | — | 处理中：AquaCommit21X86Prototype |
 | 22 | `afab5249b866ba2abe3b7ea6726c9a92a8d883e4` | x86 compat syscall macros | 21 | 待派发 |
 | 23 | `da9a810b2c77de53ccb0798b0e8f5a3bfe35a867` | x86 compat clone entry | 22 | 待派发 |
 | 24 | `412c5c2fd76ac1348931d5f712dea065d3f9ac0f` | x86 compat clone _do_fork | 23 | 待派发 |
@@ -54,7 +54,7 @@
 | 40 | `ff1d5976899fbb96aa5aec58a1da1f160df5a4a6` | set_tid checkpoint capability | 39 | 待派发 |
 | 41 | `3545eccf9d6ec00ca8f05bfef814dc3afa2fc4a8` | ns_last_pid checkpoint capability | 39 | 待派发 |
 | 42 | `5737cbe0f89cdb0f9f15e1ae804c6f7da39229ac` | map_files checkpoint capability | 39 | 待派发 |
-| 43 | `c7aa02fede4a47b1ba892b454a6fcfe97d04fab4` | prctl_set_mm permission refactor | — | 待派发 |
+| 43 | `c7aa02fede4a47b1ba892b454a6fcfe97d04fab4` | prctl_set_mm permission refactor | — | 处理中：AquaCommit43PrctlRefactor |
 | 44 | `01f7e68b52c3f2a5e50a8153d2caa65851039009` | /proc/self/exe checkpoint capability | 39、43 | 待派发 |
 | 45 | `150963f8969fb8b257a8af6721a333be23268523` | prctl exe error -EPERM | 44 | 待派发 |
 | 46 | `161299f028ca879642c4d85af8f8fd32f1989932` | clone3 checkpoint capability selftest | 38、40 | 待派发 |
