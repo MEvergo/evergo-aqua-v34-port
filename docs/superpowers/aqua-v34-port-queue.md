@@ -61,4 +61,10 @@
 | 47 | `4c0d87767fb95c0dc201c5495f5102019baa0df3` | TIOCSLCKTRMIOS checkpoint capability | 39 | 已合入：`5afb6e3410e1` |
 | 48 | `d81fee89be1c86979a2421933a0741f55918cc44` | Enable WALT in everpal defconfig | 18 | 已合入：`9ce4a2b4ad44` |
 
-第一批候选：**01、02、04、09**（上游 diff 的路径集合两两不交集）。下一批依赖实际集成和冲突报告决定，绝不因为后续提交存在就假定复杂前置提交已成功。首次私有备份与最后一次内核构建由控制者验证，不由 subagent 宣称成功。
+## 集成与离线验证
+
+- 上述 48 条官方提交均已逐条处理并合入隔离移植树；第 09 条在第 05 条引入 `__poll_t` 后实际移除了 Mali 的重复定义，没有遗留「等价」或「暂缓」项目。
+- 使用独立输出目录完成目标 **arm64** 内核的 `Image.gz dtbs` 全量编译与 `vmlinux` 链接：`4.14.357-Aqua`；`Image.gz` SHA256 为 `df8921111a15b41490d33a8a27cffec52c6a646cf5a437b3f85d6e0f0a1cb4b9`。产物包括 `mt6833.dtb`，`gzip -t Image.gz` 通过；`System.map` 有 `sys_clone3`、`compat_sys_clone3`、BPF、SukiSU、SuSFS、NoMount 和 MGLRU 相关符号。
+- 实际参与编译的 `out/.config` 启用了 `CONFIG_KSU=y`、`CONFIG_KSU_SUSFS=y`、`CONFIG_NOMOUNT=y` 和 `CONFIG_LRU_GEN=y`。按照既有 `IKCONFIG_CONFIG=stock.config` 构建约定，`vmlinux` 中抽取的内嵌配置**有意**与编译配置不同，且与原厂 `stock.config` 逐字节相同（SHA256 `13c8db7de597f9b613b0d1625e48403d4a9f32cd1e94957621a066002a4144e7`）；不能据此误判功能未编译。
+- 四个 `clone3` 用户态 selftest 已完成**编译检查**；先前误在开发机 Linux 7.2.6 上运行的结果不计入候选内核验证，此后不在开发机运行它们。候选内核未启动、未在其上运行 selftest；没有操作设备、刷机、重启、构建 ROM 或修改 SELinux 状态。
+- 原始工作树与本移植树的 `mm/vmscan.c` 逐字节一致，SHA256 均为 `2be37afd2c332114c70a3cc484b531fc57431f40a1392a883c997a80bd32067e`；保留原 MGLRU per-zone 未提交修复。
