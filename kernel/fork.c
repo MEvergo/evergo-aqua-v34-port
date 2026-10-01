@@ -2157,6 +2157,7 @@ bad_fork_cancel_cgroup:
 	cgroup_cancel_fork(p);
 bad_fork_cgroup_threadgroup_change_end:
 	cgroup_threadgroup_change_end(current);
+bad_fork_put_pidfd:
 	if (clone_flags & CLONE_PIDFD) {
 		fput(pidfile);
 		put_unused_fd(pidfd);
