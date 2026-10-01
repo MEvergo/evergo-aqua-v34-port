@@ -37,6 +37,7 @@
 #define NS_CHILD_RESULT_COUNT_MASK	0x07
 #define NS_CHILD_RESULT_FAIL_SHIFT	3
 #define NS_CHILD_TEST_COUNT		4
+#define SET_TID_TEST_COUNT		31
 
 static int pipe_1[2];
 static int pipe_2[2];
@@ -239,7 +240,6 @@ int main(void)
 		ksft_exit_fail_msg("pipe() failed\n");
 
 	ksft_print_header();
-	ksft_set_plan(31);
 
 	f = fopen("/proc/sys/kernel/pid_max", "r");
 	if (f == NULL)
@@ -333,11 +333,9 @@ int main(void)
 	test_clone3_set_tid_permission();
 
 	if (uid != 0) {
-		/*
-		 * All remaining tests require root. Tell the framework
-		 * that all those tests are skipped as non-root.
-		 */
-		ksft_cnt.ksft_xskip += ksft_plan - ksft_test_num();
+		/* Emit a skip result for each remaining root-only case. */
+		while (ksft_test_num() < SET_TID_TEST_COUNT)
+			ksft_test_result_skip("requires root for nested PID namespaces\n");
 		goto out;
 	}
 

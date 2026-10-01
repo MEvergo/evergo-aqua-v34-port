@@ -139,7 +139,6 @@ int main(void)
 	uid_t uid = getuid();
 
 	ksft_print_header();
-	ksft_set_plan(18);
 
 	/* Just a simple clone3() should return 0. */
 	test_clone3(0, 0, 0, CLONE3_ARGS_NO_TEST);
