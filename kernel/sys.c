@@ -1968,7 +1968,7 @@ static int prctl_set_mm_map(int opt, const void __user *addr, unsigned long data
 		 * capability in the current user namespace is required.
 		 */
 		if (!checkpoint_restore_ns_capable(current_user_ns()))
-			return -EINVAL;
+			return -EPERM;
 	}
 
 	if (prctl_map.auxv_size) {
