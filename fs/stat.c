@@ -20,13 +20,22 @@
 
 #include <linux/uaccess.h>
 #include <asm/unistd.h>
-#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+
+#include "mount.h"
+
+#if defined(CONFIG_KSU_SUSFS_SUS_KSTAT) || \
+	defined(CONFIG_KSU_SUSFS_SUS_MOUNT)
 #include <linux/susfs_def.h>
+#endif
+
+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+extern int susfs_get_non_sus_mnt_id_from_mnt(struct mount *orig_mnt);
 #endif
 
 #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 extern bool susfs_is_inode_sus_kstat(struct inode *inode, bool *out_is_fuse);
 extern void susfs_sus_kstat_spoof_generic_fillattr(struct inode *inode, struct kstat *stat, u32 result_mask);
+extern void susfs_sus_kstat_spoof_proc_fd_seq_show(int *out_target_mnt_id, unsigned long *out_target_ino, dev_t target_dev);
 #endif // #ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
 
 /**
@@ -246,6 +255,32 @@ retry:
 		goto out;
 
 	error = vfs_getattr(&path, stat, request_mask, flags);
+	if (!error) {
+		struct mount *mnt = real_mount(path.mnt);
+		int mnt_id = mnt->mnt_id;
+
+#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+		struct inode *inode = d_backing_inode(path.dentry);
+		bool is_fuse = false;
+
+		if (susfs_is_current_app_uid() &&
+		    susfs_is_inode_sus_kstat(inode, &is_fuse)) {
+			unsigned long ino = inode->i_ino;
+
+			susfs_sus_kstat_spoof_proc_fd_seq_show(
+				&mnt_id, &ino, inode->i_sb->s_dev);
+		} else
+#endif
+		{
+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+			if (susfs_is_current_proc_umounted() &&
+			    mnt->mnt_id >= DEFAULT_KSU_MNT_ID)
+				mnt_id = susfs_get_non_sus_mnt_id_from_mnt(mnt);
+#endif
+		}
+		stat->mnt_id = mnt_id;
+		stat->result_mask |= STATX_MNT_ID;
+	}
 	path_put(&path);
 	if (retry_estale(error, lookup_flags)) {
 		lookup_flags |= LOOKUP_REVAL;
@@ -600,6 +635,7 @@ cp_statx(const struct kstat *stat, struct statx __user *buffer)
 	tmp.stx_rdev_minor = MINOR(stat->rdev);
 	tmp.stx_dev_major = MAJOR(stat->dev);
 	tmp.stx_dev_minor = MINOR(stat->dev);
+	tmp.stx_mnt_id = stat->mnt_id;
 
 	return copy_to_user(buffer, &tmp, sizeof(tmp)) ? -EFAULT : 0;
 }
