@@ -379,6 +379,8 @@ int ksu_lsm_hook(struct ksu_lsm_hook *hook)
         pr_err("lsm_hook: too many hooks to track: %d\n", ret);
         goto out_unlock;
     }
+    /* The replacement may run as soon as its slot becomes visible. */
+    smp_store_release(&hook->original, selected_origin);
 
     if (selected_origin) {
         pr_info("patch func addr\n");
@@ -389,13 +391,21 @@ int ksu_lsm_hook(struct ksu_lsm_hook *hook)
     }
 
     if (ret) {
+        int rollback_ret;
+
+        rollback_ret = ksu_lsm_hook_patch_slot(selected_slot, selected_origin);
+        if (rollback_ret && READ_ONCE(*selected_slot) != selected_origin) {
+            hook->entry = selected_entry;
+            pr_err("lsm_hook: failed to roll back partially patched %s slot: %d\n",
+                   hook->head_name ?: "unknown", rollback_ret);
+            goto out_unlock;
+        }
         pr_err("lsm_hook: failed to patch %s\n", hook->head_name ?: "unknown");
         ret = -EFAULT;
         goto out_untrack;
     }
 
     hook->entry = selected_entry;
-    hook->original = selected_origin;
     pr_info("lsm_hook: patched %s hook slot %px from %px to %px\n", hook->head_name ?: "unknown", selected_slot,
             selected_origin, hook->replacement);
 #else
