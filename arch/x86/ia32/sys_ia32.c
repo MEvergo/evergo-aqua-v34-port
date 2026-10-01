@@ -252,8 +252,7 @@ COMPAT_SYSCALL_DEFINE5(x86_clone, unsigned long, clone_flags,
 		.tls		= tls_val,
 	};
 
-	/* clone(CLONE_PIDFD) uses parent_tidptr to return a pidfd */
-	if ((clone_flags & CLONE_PIDFD) && (clone_flags & CLONE_PARENT_SETTID))
+	if (!legacy_clone_args_valid(&args))
 		return -EINVAL;
 
 	return _do_fork(&args);
