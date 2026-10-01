@@ -280,7 +280,11 @@ retry:
 		}
 		stat->mnt_id = mnt_id;
 		stat->result_mask |= STATX_MNT_ID;
+		if (path.mnt->mnt_root == path.dentry &&
+		    stat->mnt_id == mnt->mnt_id)
+			stat->attributes |= STATX_ATTR_MOUNT_ROOT;
 	}
+	stat->attributes_mask |= STATX_ATTR_MOUNT_ROOT;
 	path_put(&path);
 	if (retry_estale(error, lookup_flags)) {
 		lookup_flags |= LOOKUP_REVAL;
