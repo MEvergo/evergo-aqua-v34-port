@@ -12,15 +12,15 @@
 
 | # | 上游 SHA | 主题 | 必须满足的前置提交 | 状态 |
 |---:|---|---|---|---|
-| 01 | `9387a4e13dab74c017379a691061a4c0d06354f5` | power_supply: Create input_suspend node | — | 待派发 |
-| 02 | `28123b05c48f3a3f68bd2880799d163817510b1d` | binder: Checkout to android-4.19-stable | — | 待派发 |
+| 01 | `9387a4e13dab74c017379a691061a4c0d06354f5` | power_supply: Create input_suspend node | — | 处理中：AquaCommit01InputSuspend |
+| 02 | `28123b05c48f3a3f68bd2880799d163817510b1d` | binder: Checkout to android-4.19-stable | — | 处理中：AquaCommit02Binder419 |
 | 03 | `5afd363a10c1e44187095efdabd3cafdd001e884` | binder: Fix 4.19 binder compilation on 4.14 | 02 | 待派发 |
-| 04 | `7042fefca96282acdaa6d1c89ff28eb59b5f3bb6` | netprio: use css ID instead of cgroup ID | — | 待派发 |
+| 04 | `7042fefca96282acdaa6d1c89ff28eb59b5f3bb6` | netprio: use css ID instead of cgroup ID | — | 处理中：AquaCommit04NetprioCss |
 | 05 | `a184e7d6c259c73c66cc884f65a06e7891508cf8` | BPF-5.10 large import (one-parent, substantive) | 04 | 待派发 |
 | 06 | `2a866e985f5ee69dd2795860fe5f83f747a612d8` | cgroup ID access via kernfs node | 05 | 待派发 |
 | 07 | `71ceef5bb220e8718181ee583191f67f15cf7bf0` | kernfs inode attribute access | 05 | 待派发 |
 | 08 | `0e0433bce60876b0b417e0fd187ed6e2c15ca0e4` | MTK LPM kernfs_create_file arguments | 05、07 | 待派发 |
-| 09 | `fe798968a81f74e49e9eda6cf777e32950e5fc56` | Mali redundant __poll_t typedef | — | 待派发 |
+| 09 | `fe798968a81f74e49e9eda6cf777e32950e5fc56` | Mali redundant __poll_t typedef | — | 处理中：AquaCommit09MaliPoll |
 | 10 | `e5efe77b90f2720465383603156f99b2e817c767` | Drop exit_umh inline; local caller must be resolved | 05 | 待派发 |
 | 11 | `7b3a94ec99fc5ef73d811e0a01e29d2015ddbc8e` | Cortex-A76 compiler optimization | 05 | 待派发 |
 | 12 | `0fdc8173e96f5d36597357305b4cbb6f0c319826` | Move stat attributes into vfs_getattr_nosec | — | 待派发 |
