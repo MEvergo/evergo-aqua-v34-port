@@ -5,6 +5,7 @@
 #include <linux/uaccess.h>
 #include <linux/version.h>
 #include <linux/sched/task.h>
+#include <linux/sched/signal.h>
 #include <linux/thread_info.h>
 #ifdef CONFIG_KSU_SUSFS
 #include <linux/susfs.h>

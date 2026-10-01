@@ -8,7 +8,6 @@
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)
 #define copy_from_user_nofault probe_user_read
 #define copy_to_user_nofault probe_user_write
-#define strncpy_from_user_nofault strncpy_from_unsafe_user
 #endif
 
 #if LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)
