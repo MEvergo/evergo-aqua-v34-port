@@ -25,16 +25,16 @@
 | 11 | `7b3a94ec99fc5ef73d811e0a01e29d2015ddbc8e` | Cortex-A76 compiler optimization | 05 | 待派发 |
 | 12 | `0fdc8173e96f5d36597357305b4cbb6f0c319826` | Move stat attributes into vfs_getattr_nosec | — | 已合入：`f18f8abfbffd`，保留 SUSFS 提前返回属性 |
 | 13 | `04af80e5f5120a14503c0a8039e249fe33e474d2` | statx DAX attribute | 12 | 已合入：`35b56f571089`，后续 17 将修正属性位重叠 |
-| 14 | `c71cfde70ff87617fb8049d3c7cbac4e7f0215af` | Deprecate STATX_ALL | 13 | 处理中：AquaCommit14StatxAll |
-| 15 | `7c0b56ad9ab9d2c8e7f547b2a3b69f1c7a322274` | statx mount ID | 14 | 待派发 |
+| 14 | `c71cfde70ff87617fb8049d3c7cbac4e7f0215af` | Deprecate STATX_ALL | 13 | 已合入：`575a529d5178`，OrangeFS 显式保留原有掩码 |
+| 15 | `7c0b56ad9ab9d2c8e7f547b2a3b69f1c7a322274` | statx mount ID | 14 | 处理中：AquaCommit15StatxMountId |
 | 16 | `0fd1ca0ee73e8c6ca280e2f2e1f000d5d755eaa0` | statx mount_root | 15 | 待派发 |
 | 17 | `29a7465fd2653ea835d5cc1fc2961d744d4d97ce` | Fix DAX/MOUNT_ROOT attribute-bit overlap | 16 | 待派发 |
 | 18 | `5ab3aca066f999562b8b8a1e80f8fff546dd1321` | Remove Maple IO Scheduler | — | 已合入：`5e1395830391`，默认 CFQ |
 | 19 | `3fc2c50a33860a55370be83c22883ca34860be39` | modpost NOFAIL strndup | — | 已合入：`e4df607c0046`，目标文件与上游一致 |
 | 20 | `0aab45864e4950a0c05da0aa5d5e776d24b2c9cf` | modpost match() const qualifier | 19 | 已合入：`e18d05c39975` |
 | 21 | `a3970ca73e102de6912deb3c84a8b4d4dcf11511` | Remove stale x86 syscall prototype | — | 已合入：`a83e33309492` |
-| 22 | `afab5249b866ba2abe3b7ea6726c9a92a8d883e4` | x86 compat syscall macros | 21 | 处理中：AquaCommit22X86Compat |
-| 23 | `da9a810b2c77de53ccb0798b0e8f5a3bfe35a867` | x86 compat clone entry | 22 | 待派发 |
+| 22 | `afab5249b866ba2abe3b7ea6726c9a92a8d883e4` | x86 compat syscall macros | 21 | 已合入：`03df1bca365c`，对应迁移 15 个兼容系统调用入口 |
+| 23 | `da9a810b2c77de53ccb0798b0e8f5a3bfe35a867` | x86 compat clone entry | 22 | 处理中：AquaCommit23X86CloneEntry |
 | 24 | `412c5c2fd76ac1348931d5f712dea065d3f9ac0f` | x86 compat clone _do_fork | 23 | 待派发 |
 | 25 | `fef4466bd4ae7aa2ec66d01f6a1bda57e5beb082` | pidfd creation and cleanup | 05 | 待派发 |
 | 26 | `ee66522755e6cef28769925bff19b565e4a87af7` | fork early error return | 25 | 待派发 |
