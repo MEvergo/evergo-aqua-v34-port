@@ -12,7 +12,7 @@
 
 | # | 上游 SHA | 主题 | 必须满足的前置提交 | 状态 |
 |---:|---|---|---|---|
-| 01 | `9387a4e13dab74c017379a691061a4c0d06354f5` | power_supply: Create input_suspend node | — | 处理中：AquaCommit01InputSuspend |
+| 01 | `9387a4e13dab74c017379a691061a4c0d06354f5` | power_supply: Create input_suspend node | — | 已合入：`87f07b7faa37`（无效输入明确返回解析错误） |
 | 02 | `28123b05c48f3a3f68bd2880799d163817510b1d` | binder: Checkout to android-4.19-stable | — | 处理中：AquaCommit02Binder419 |
 | 03 | `5afd363a10c1e44187095efdabd3cafdd001e884` | binder: Fix 4.19 binder compilation on 4.14 | 02 | 待派发 |
 | 04 | `7042fefca96282acdaa6d1c89ff28eb59b5f3bb6` | netprio: use css ID instead of cgroup ID | — | 已合入：`6ba8e00c1d1a` |
