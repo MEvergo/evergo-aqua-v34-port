@@ -4137,6 +4137,41 @@ static DEVICE_ATTR(
 	Power_Off_Voltage, 0664,
 	show_Power_Off_Voltage, store_Power_Off_Voltage);
 
+static ssize_t show_input_suspend(
+	struct device *dev, struct device_attribute *attr, char *buf)
+{
+	return sprintf(buf, "%u\n", gm.input_suspend);
+}
+
+static ssize_t store_input_suspend(
+	struct device *dev, struct device_attribute *attr,
+	const char *buf, size_t size)
+{
+	unsigned long val;
+	int ret;
+
+	if (buf == NULL || size == 0)
+		return size;
+
+	ret = kstrtoul(buf, 10, &val);
+	if (ret)
+		return ret;
+
+	val = (val > 0) ? 0 : 1;
+	gm.input_suspend = !val;
+	if (gm.pbat_consumer != NULL) {
+		charger_manager_enable_charging(gm.pbat_consumer, 0, val);
+		charger_manager_enable_charging(gm.pbat_consumer, 1, val);
+		charger_manager_enable_hz(
+			gm.pbat_consumer, 0, gm.input_suspend);
+	}
+
+	return size;
+}
+
+static DEVICE_ATTR(
+	input_suspend, 0664, show_input_suspend, store_input_suspend);
+
 
 static int battery_callback(
 	struct notifier_block *nb, unsigned long event, void *v)
@@ -4736,6 +4771,8 @@ static int __init battery_probe(struct platform_device *dev)
 		gm.bat_nb.notifier_call = battery_callback;
 		register_charger_manager_notifier(gm.pbat_consumer, &gm.bat_nb);
 	}
+	gm.input_suspend = false;
+	ret = device_create_file(&battery_main.psy->dev, &dev_attr_input_suspend);
 
 	ret = device_create_file(&battery_main.psy->dev, &dev_attr_charging_call_state);
 	battery_debug_init();
