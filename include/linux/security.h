@@ -288,6 +288,7 @@ void security_bprm_committing_creds(struct linux_binprm *bprm);
 void security_bprm_committed_creds(struct linux_binprm *bprm);
 int security_sb_alloc(struct super_block *sb);
 void security_sb_free(struct super_block *sb);
+void security_sb_delete(struct super_block *sb);
 int security_sb_copy_data(char *orig, char *copy);
 int security_sb_remount(struct super_block *sb, void *data);
 int security_sb_kern_mount(struct super_block *sb, int flags, void *data);
@@ -297,6 +298,8 @@ int security_sb_mount(const char *dev_name, const struct path *path,
 		      const char *type, unsigned long flags, void *data);
 int security_sb_umount(struct vfsmount *mnt, int flags);
 int security_sb_pivotroot(const struct path *old_path, const struct path *new_path);
+int security_move_mount(const struct path *from_path,
+			const struct path *to_path);
 int security_sb_set_mnt_opts(struct super_block *sb,
 				struct security_mnt_opts *opts,
 				unsigned long kern_flags,
@@ -609,6 +612,10 @@ static inline int security_sb_alloc(struct super_block *sb)
 
 static inline void security_sb_free(struct super_block *sb)
 { }
+static inline void security_sb_delete(struct super_block *sb)
+{
+}
+
 
 static inline int security_sb_copy_data(char *orig, char *copy)
 {
@@ -653,6 +660,12 @@ static inline int security_sb_pivotroot(const struct path *old_path,
 {
 	return 0;
 }
+static inline int security_move_mount(const struct path *from_path,
+				      const struct path *to_path)
+{
+	return 0;
+}
+
 
 static inline int security_sb_set_mnt_opts(struct super_block *sb,
 					   struct security_mnt_opts *opts,

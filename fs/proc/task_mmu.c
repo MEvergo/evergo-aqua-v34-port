@@ -73,7 +73,7 @@ void task_mem(struct seq_file *m, struct mm_struct *mm)
 		hiwater_vm << (PAGE_SHIFT-10),
 		total_vm << (PAGE_SHIFT-10),
 		mm->locked_vm << (PAGE_SHIFT-10),
-		mm->pinned_vm << (PAGE_SHIFT-10),
+		(unsigned long)atomic64_read(&mm->pinned_vm) << (PAGE_SHIFT-10),
 		hiwater_rss << (PAGE_SHIFT-10),
 		total_rss << (PAGE_SHIFT-10),
 		anon << (PAGE_SHIFT-10),

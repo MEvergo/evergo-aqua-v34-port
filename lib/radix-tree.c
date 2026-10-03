@@ -34,6 +34,7 @@
 #include <linux/percpu.h>
 #include <linux/preempt.h>		/* in_interrupt() */
 #include <linux/radix-tree.h>
+#include <linux/xarray.h>
 #include <linux/rcupdate.h>
 #include <linux/slab.h>
 #include <linux/string.h>
@@ -45,7 +46,7 @@ static unsigned long height_to_maxnodes[RADIX_TREE_MAX_PATH + 1] __read_mostly;
 /*
  * Radix tree node cache.
  */
-static struct kmem_cache *radix_tree_node_cachep;
+struct kmem_cache *radix_tree_node_cachep;
 
 /*
  * The radix tree is variable-height, so an insert operation not only has
@@ -431,7 +432,7 @@ out:
 	return ret;
 }
 
-static void radix_tree_node_rcu_free(struct rcu_head *head)
+void radix_tree_node_rcu_free(struct rcu_head *head)
 {
 	struct radix_tree_node *node =
 			container_of(head, struct radix_tree_node, rcu_head);
@@ -2288,6 +2289,17 @@ void __init radix_tree_init(void)
 	int ret;
 
 	BUILD_BUG_ON(RADIX_TREE_MAX_TAGS + __GFP_BITS_SHIFT > 32);
+	BUILD_BUG_ON(sizeof(struct radix_tree_node) != sizeof(struct xa_node));
+	BUILD_BUG_ON(offsetof(struct radix_tree_node, parent) !=
+		     offsetof(struct xa_node, parent));
+	BUILD_BUG_ON(offsetof(struct radix_tree_node, root) !=
+		     offsetof(struct xa_node, array));
+	BUILD_BUG_ON(offsetof(struct radix_tree_node, rcu_head) !=
+		     offsetof(struct xa_node, rcu_head));
+	BUILD_BUG_ON(offsetof(struct radix_tree_node, slots) !=
+		     offsetof(struct xa_node, slots));
+	BUILD_BUG_ON(offsetof(struct radix_tree_node, tags) !=
+		     offsetof(struct xa_node, marks));
 	radix_tree_node_cachep = kmem_cache_create("radix_tree_node",
 			sizeof(struct radix_tree_node), 0,
 			SLAB_PANIC | SLAB_RECLAIM_ACCOUNT,

@@ -58,9 +58,7 @@ static void __ib_umem_release(struct ib_device *dev, struct ib_umem *umem, int d
 	for_each_sg(umem->sg_head.sgl, sg, umem->npages, i) {
 
 		page = sg_page(sg);
-		if (!PageDirty(page) && umem->writable && dirty)
-			set_page_dirty_lock(page);
-		put_page(page);
+		unpin_user_pages_dirty_lock(&page, 1, umem->writable && dirty);
 	}
 
 	sg_free_table(&umem->sg_head);
@@ -153,7 +151,7 @@ struct ib_umem *ib_umem_get(struct ib_ucontext *context, unsigned long addr,
 
 	down_write(&current->mm->mmap_sem);
 
-	locked     = npages + current->mm->pinned_vm;
+	locked = npages + atomic64_read(&current->mm->pinned_vm);
 	lock_limit = rlimit(RLIMIT_MEMLOCK) >> PAGE_SHIFT;
 
 	if ((locked > lock_limit) && !capable(CAP_IPC_LOCK)) {
@@ -179,10 +177,11 @@ struct ib_umem *ib_umem_get(struct ib_ucontext *context, unsigned long addr,
 	sg_list_start = umem->sg_head.sgl;
 
 	while (npages) {
-		ret = get_user_pages_longterm(cur_base,
+		ret = pin_user_pages(cur_base,
 				     min_t(unsigned long, npages,
 					   PAGE_SIZE / sizeof (struct page *)),
-				     gup_flags, page_list, vma_list);
+				     gup_flags | FOLL_LONGTERM, page_list,
+				     vma_list);
 
 		if (ret < 0)
 			goto out;
@@ -221,7 +220,7 @@ out:
 			__ib_umem_release(context->device, umem, 0);
 		kfree(umem);
 	} else
-		current->mm->pinned_vm = locked;
+		atomic64_add(umem->npages, &current->mm->pinned_vm);
 
 	up_write(&current->mm->mmap_sem);
 	if (vma_list)
@@ -237,7 +236,7 @@ static void ib_umem_account(struct work_struct *work)
 	struct ib_umem *umem = container_of(work, struct ib_umem, work);
 
 	down_write(&umem->mm->mmap_sem);
-	umem->mm->pinned_vm -= umem->diff;
+	atomic64_sub(umem->diff, &umem->mm->pinned_vm);
 	up_write(&umem->mm->mmap_sem);
 	mmput(umem->mm);
 	kfree(umem);
@@ -291,7 +290,7 @@ void ib_umem_release(struct ib_umem *umem)
 	} else
 		down_write(&mm->mmap_sem);
 
-	mm->pinned_vm -= diff;
+	atomic64_sub(diff, &mm->pinned_vm);
 	up_write(&mm->mmap_sem);
 	mmput(mm);
 out:

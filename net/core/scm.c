@@ -213,42 +213,48 @@ error:
 }
 EXPORT_SYMBOL(__scm_send);
 
-int put_cmsg(struct msghdr * msg, int level, int type, int len, void *data)
+int put_cmsg(struct msghdr *msg, int level, int type, int len, void *data)
 {
-	struct cmsghdr __user *cm
-		= (__force struct cmsghdr __user *)msg->msg_control;
+	struct cmsghdr __user *cm_user;
+	struct cmsghdr *cm;
 	struct cmsghdr cmhdr;
 	int cmlen = CMSG_LEN(len);
-	int err;
 
 	if (MSG_CMSG_COMPAT & msg->msg_flags)
 		return put_cmsg_compat(msg, level, type, len, data);
 
-	if (cm==NULL || msg->msg_controllen < sizeof(*cm)) {
+	if (!msg->msg_control || msg->msg_controllen < sizeof(struct cmsghdr)) {
 		msg->msg_flags |= MSG_CTRUNC;
-		return 0; /* XXX: return error? check spec. */
+		return 0;
 	}
 	if (msg->msg_controllen < cmlen) {
 		msg->msg_flags |= MSG_CTRUNC;
 		cmlen = msg->msg_controllen;
 	}
-	cmhdr.cmsg_level = level;
-	cmhdr.cmsg_type = type;
-	cmhdr.cmsg_len = cmlen;
 
-	err = -EFAULT;
-	if (copy_to_user(cm, &cmhdr, sizeof cmhdr))
-		goto out;
-	if (copy_to_user(CMSG_DATA(cm), data, cmlen - sizeof(struct cmsghdr)))
-		goto out;
+	if (msg->msg_control_is_user) {
+		cm_user = msg->msg_control_user;
+		cmhdr.cmsg_level = level;
+		cmhdr.cmsg_type = type;
+		cmhdr.cmsg_len = cmlen;
+		if (copy_to_user(cm_user, &cmhdr, sizeof(cmhdr)) ||
+		    copy_to_user(CMSG_DATA(cm_user), data,
+				 cmlen - sizeof(struct cmsghdr)))
+			return -EFAULT;
+	} else {
+		cm = msg->msg_control;
+		cm->cmsg_level = level;
+		cm->cmsg_type = type;
+		cm->cmsg_len = cmlen;
+		memcpy(CMSG_DATA(cm), data, cmlen - sizeof(struct cmsghdr));
+	}
+
 	cmlen = CMSG_SPACE(len);
 	if (msg->msg_controllen < cmlen)
 		cmlen = msg->msg_controllen;
 	msg->msg_control += cmlen;
 	msg->msg_controllen -= cmlen;
-	err = 0;
-out:
-	return err;
+	return 0;
 }
 EXPORT_SYMBOL(put_cmsg);
 
@@ -267,6 +273,12 @@ void scm_detach_fds(struct msghdr *msg, struct scm_cookie *scm)
 		scm_detach_fds_compat(msg, scm);
 		return;
 	}
+	if (WARN_ON_ONCE(!msg->msg_control_is_user)) {
+		msg->msg_flags |= MSG_CTRUNC;
+		__scm_destroy(scm);
+		return;
+	}
+
 
 	if (msg->msg_controllen > sizeof(struct cmsghdr))
 		fdmax = ((msg->msg_controllen - sizeof(struct cmsghdr))

@@ -41,6 +41,11 @@ int compat_sock_get_timestampns(struct sock *, struct timespec __user *);
 #define compat_mmsghdr	mmsghdr
 #endif /* defined(CONFIG_COMPAT) */
 
+#ifdef CONFIG_COMPAT
+int __get_compat_msghdr(struct msghdr *, struct compat_msghdr __user *,
+			struct sockaddr __user **, compat_uptr_t *,
+			compat_size_t *);
+#endif
 int get_compat_msghdr(struct msghdr *, struct compat_msghdr __user *,
 		      struct sockaddr __user **, struct iovec **);
 int put_cmsg_compat(struct msghdr*, int, int, int, void *);

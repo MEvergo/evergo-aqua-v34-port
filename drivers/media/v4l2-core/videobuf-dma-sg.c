@@ -185,14 +185,20 @@ static int videobuf_dma_init_user_locked(struct videobuf_dmabuf *dma,
 	dprintk(1, "init user [0x%lx+0x%lx => %d pages]\n",
 		data, size, dma->nr_pages);
 
-	err = get_user_pages_longterm(data & PAGE_MASK, dma->nr_pages,
-			     flags, dma->pages, NULL);
+	err = pin_user_pages(data & PAGE_MASK, dma->nr_pages,
+			     flags | FOLL_LONGTERM, dma->pages, NULL);
 
 	if (err != dma->nr_pages) {
-		dma->nr_pages = (err >= 0) ? err : 0;
-		dprintk(1, "get_user_pages_longterm: err=%d [%d]\n", err,
-			dma->nr_pages);
-		return err < 0 ? err : -EINVAL;
+		int ret = err < 0 ? err : -EINVAL;
+
+		dma->nr_pages = (err > 0) ? err : 0;
+		if (dma->nr_pages)
+			unpin_user_pages(dma->pages, dma->nr_pages);
+		kfree(dma->pages);
+		dma->pages = NULL;
+		dma->nr_pages = 0;
+		dprintk(1, "pin_user_pages: err=%d\n", err);
+		return ret;
 	}
 	return 0;
 }
@@ -352,11 +358,8 @@ int videobuf_dma_free(struct videobuf_dmabuf *dma)
 	BUG_ON(dma->sglen);
 
 	if (dma->pages) {
-		for (i = 0; i < dma->nr_pages; i++) {
-			if (dma->direction == DMA_FROM_DEVICE)
-				set_page_dirty_lock(dma->pages[i]);
-			put_page(dma->pages[i]);
-		}
+		unpin_user_pages_dirty_lock(dma->pages, dma->nr_pages,
+					    dma->direction == DMA_FROM_DEVICE);
 		kfree(dma->pages);
 		dma->pages = NULL;
 	}
@@ -568,9 +571,16 @@ static int __videobuf_iolock(struct videobuf_queue *q,
 	default:
 		BUG();
 	}
-	err = videobuf_dma_map(q->dev, &mem->dma);
-	if (0 != err)
+	if (err) {
+		if (mem->dma.pages) {
+			unpin_user_pages(mem->dma.pages, mem->dma.nr_pages);
+			kfree(mem->dma.pages);
+			mem->dma.pages = NULL;
+			mem->dma.nr_pages = 0;
+		}
+		videobuf_dma_free(&mem->dma);
 		return err;
+	}
 
 	return 0;
 }

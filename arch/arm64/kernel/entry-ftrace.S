@@ -14,6 +14,107 @@
 #include <asm/ftrace.h>
 #include <asm/insn.h>
 
+
+#ifdef CONFIG_DYNAMIC_FTRACE_WITH_REGS
+#include <asm/asm-offsets.h>
+
+/*
+ * With -fpatchable-function-entry=2 each traced function starts with two
+ * NOPs. ftrace_init_nop() replaces the first with MOV X9, LR, and ftrace
+ * replaces the second with BL to one of these entry points.
+ */
+	.macro ftrace_regs_entry, allregs=0
+	sub	sp, sp, #(S_FRAME_SIZE + 16)
+
+	stp	x0, x1, [sp, #S_X0]
+	stp	x2, x3, [sp, #S_X2]
+	stp	x4, x5, [sp, #S_X4]
+	stp	x6, x7, [sp, #S_X6]
+	stp	x8, x9, [sp, #S_X8]
+	str	xzr, [sp, #S_ORIG_X0]
+
+	.if \allregs == 1
+	stp	x10, x11, [sp, #S_X10]
+	stp	x12, x13, [sp, #S_X12]
+	stp	x14, x15, [sp, #S_X14]
+	stp	x16, x17, [sp, #S_X16]
+	stp	x18, x19, [sp, #S_X18]
+	stp	x20, x21, [sp, #S_X20]
+	stp	x22, x23, [sp, #S_X22]
+	stp	x24, x25, [sp, #S_X24]
+	stp	x26, x27, [sp, #S_X26]
+	stp	x28, x29, [sp, #S_X28]
+	.else
+	str	x29, [sp, #S_FP]
+	.endif
+
+	add	x10, sp, #(S_FRAME_SIZE + 16)
+	stp	x9, x10, [sp, #S_LR]
+	str	x30, [sp, #S_PC]
+
+	stp	x29, x9, [sp, #S_FRAME_SIZE]
+	add	x29, sp, #S_FRAME_SIZE
+	stp	x29, x30, [sp, #S_STACKFRAME]
+	add	x29, sp, #S_STACKFRAME
+	.endm
+
+ENTRY(ftrace_regs_caller)
+	ftrace_regs_entry	1
+	b	ftrace_common
+ENDPROC(ftrace_regs_caller)
+
+ENTRY(ftrace_caller)
+	ftrace_regs_entry	0
+	b	ftrace_common
+ENDPROC(ftrace_caller)
+
+ENTRY(ftrace_common)
+	sub	x0, x30, #AARCH64_INSN_SIZE
+	mov	x1, x9
+	ldr_l	x2, function_trace_op
+	mov	x3, sp
+
+	.globl	ftrace_call
+ftrace_call:
+	bl	ftrace_stub
+
+#ifdef CONFIG_FUNCTION_GRAPH_TRACER
+	.globl	ftrace_graph_call
+ftrace_graph_call:
+	nop
+#endif
+
+ftrace_common_return:
+	ldp	x0, x1, [sp, #S_X0]
+	ldp	x2, x3, [sp, #S_X2]
+	ldp	x4, x5, [sp, #S_X4]
+	ldp	x6, x7, [sp, #S_X6]
+	ldr	x8, [sp, #S_X8]
+	ldr	x9, [sp, #S_LR]
+	ldr	x30, [sp, #S_LR]
+	ldr	x10, [sp, #S_PC]
+	ldr	x11, [sp, #S_ORIG_X0]
+	cmp	x11, #1
+	b.ne	1f
+	ldr	x30, [sp, #S_STACKFRAME + 8]
+1:
+	ldr	x29, [sp, #S_FP]
+	add	sp, sp, #(S_FRAME_SIZE + 16)
+	ret	x10
+ENDPROC(ftrace_common)
+
+#ifdef CONFIG_FUNCTION_GRAPH_TRACER
+ENTRY(ftrace_graph_caller)
+	add	x0, sp, #S_LR
+	ldr	x1, [sp, #S_PC]
+	sub	x1, x1, #AARCH64_INSN_SIZE
+	ldr	x2, [sp, #S_FRAME_SIZE]
+	bl	prepare_ftrace_return
+	b	ftrace_common_return
+ENDPROC(ftrace_graph_caller)
+#endif
+
+#else /* CONFIG_DYNAMIC_FTRACE_WITH_REGS */
 /*
  * Gcc with -pg will put the following code in the beginning of each function:
  *      mov x0, x30
@@ -168,6 +269,7 @@ ftrace_graph_call:			// ftrace_graph_caller();
 	mcount_exit
 ENDPROC(ftrace_caller)
 #endif /* CONFIG_DYNAMIC_FTRACE */
+#endif /* CONFIG_DYNAMIC_FTRACE_WITH_REGS */
 
 ENTRY(ftrace_stub)
 	ret
@@ -201,6 +303,7 @@ ENDPROC(ftrace_stub)
  * the call stack in order to intercept instrumented function's return path
  * and run return_to_handler() later on its exit.
  */
+#ifndef CONFIG_DYNAMIC_FTRACE_WITH_REGS
 ENTRY(ftrace_graph_caller)
 	mcount_get_lr_addr	  x0	//     pointer to function's saved lr
 	mcount_get_pc		  x1	//     function's pc
@@ -209,6 +312,7 @@ ENTRY(ftrace_graph_caller)
 
 	mcount_exit
 ENDPROC(ftrace_graph_caller)
+#endif /* !CONFIG_DYNAMIC_FTRACE_WITH_REGS */
 
 /*
  * void return_to_handler(void)

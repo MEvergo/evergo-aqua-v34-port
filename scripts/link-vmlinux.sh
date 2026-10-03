@@ -126,7 +126,8 @@ recordmcount()
 		return
 	fi
 
-	if [ -n "${CONFIG_FTRACE_MCOUNT_RECORD}" ]; then
+	if [ -n "${CONFIG_FTRACE_MCOUNT_RECORD}" ] && \
+	   [ -z "${CONFIG_HAVE_PATCHABLE_FUNCTION_ENTRY}" ]; then
 		scripts/recordmcount ${RECORDMCOUNT_FLAGS} $*
 	fi
 }
@@ -195,14 +196,17 @@ gen_btf()
 	fi
 
 	pahole_ver=$(${PAHOLE} --version | sed -E 's/v([0-9]+)\.([0-9]+)/\1\2/')
-	if [ "${pahole_ver}" -lt "113" ]; then
-		info "BTF" "${1}: pahole version $(${PAHOLE} --version) is too old, need at least v1.13"
+	if [ "${pahole_ver}" -lt "132" ]; then
+		info "BTF" "${1}: pahole version $(${PAHOLE} --version) is too old, need at least v1.32"
 		return 1
 	fi
 
 	info "BTF" ${2}
 	vmlinux_link ${1}
-	LLVM_OBJCOPY=${OBJCOPY} ${PAHOLE} -J ${1}
+	LLVM_OBJCOPY=${OBJCOPY} ${PAHOLE} -J \
+		--skip_encoding_btf_enum64 \
+		--skip_encoding_btf_decl_tag \
+		--skip_encoding_btf_type_tag ${1}
 
 	# Create ${2} which contains just .BTF section but no symbols. Add
 	# SHF_ALLOC because .BTF will be part of the vmlinux image. --strip-all
@@ -344,6 +348,16 @@ if [ -n "${CONFIG_LTO_CLANG}" ]; then
 	# Call recordmcount if needed
 	recordmcount vmlinux.o
 fi
+btf_vmlinux_bin_o=""
+if [ -n "${CONFIG_DEBUG_INFO_BTF}" ]; then
+	btf_vmlinux_bin_o=.btf.vmlinux.bin.o
+	if ! gen_btf .tmp_vmlinux.btf ${btf_vmlinux_bin_o}; then
+		echo >&2 "Failed to generate BTF for vmlinux"
+		echo >&2 "Try to disable CONFIG_DEBUG_INFO_BTF"
+		exit 1
+	fi
+fi
+
 
 kallsymso=""
 kallsyms_vmlinux=""

@@ -102,11 +102,23 @@ static int ext4_release_file(struct inode *inode, struct file *filp)
 	return 0;
 }
 
-static void ext4_unwritten_wait(struct inode *inode)
+static void ext4_unwritten_wait(struct inode *inode, struct kiocb *iocb)
 {
 	wait_queue_head_t *wq = ext4_ioend_wq(inode);
 
-	wait_event(*wq, (atomic_read(&EXT4_I(inode)->i_unwritten) == 0));
+	if (iocb && (iocb->ki_flags & IOCB_HIPRI)) {
+		/*
+		 * The IOPOLL submitter must poll these bios before it can
+		 * return to io_uring.  Poll here while retaining i_mutex so
+		 * unaligned DIO remains serialized through extent conversion.
+		 */
+		while (atomic_read(&EXT4_I(inode)->i_unwritten) != 0) {
+			if (!blockdev_direct_IO_iopoll(iocb, true))
+				cond_resched();
+		}
+	} else {
+		wait_event(*wq, (atomic_read(&EXT4_I(inode)->i_unwritten) == 0));
+	}
 }
 
 /*
@@ -252,7 +264,7 @@ ext4_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 	    !is_sync_kiocb(iocb) &&
 	    ext4_unaligned_aio(inode, from, iocb->ki_pos)) {
 		unaligned_aio = 1;
-		ext4_unwritten_wait(inode);
+		ext4_unwritten_wait(inode, NULL);
 	}
 
 	iocb->private = &overwrite;
@@ -274,7 +286,7 @@ ext4_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 	 * corruption.
 	 */
 	if (ret == -EIOCBQUEUED && unaligned_aio)
-		ext4_unwritten_wait(inode);
+		ext4_unwritten_wait(inode, iocb);
 	inode_unlock(inode);
 
 	if (ret > 0)
@@ -439,7 +451,7 @@ static int ext4_file_open(struct inode * inode, struct file * filp)
 			return ret;
 	}
 
-	filp->f_mode |= FMODE_NOWAIT;
+	filp->f_mode |= FMODE_NOWAIT | FMODE_BUF_RASYNC;
 	return dquot_file_open(inode, filp);
 }
 
@@ -726,6 +738,7 @@ const struct file_operations ext4_file_operations = {
 	.read_iter	= ext4_file_read_iter,
 	.write_iter	= ext4_file_write_iter,
 	.unlocked_ioctl = ext4_ioctl,
+	.iopoll		= blockdev_direct_IO_iopoll,
 #ifdef CONFIG_COMPAT
 	.compat_ioctl	= ext4_compat_ioctl,
 #endif

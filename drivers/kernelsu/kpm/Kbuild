@@ -1,0 +1,6 @@
+# SPDX-License-Identifier: GPL-2.0-or-later
+ccflags-y += -Wno-strict-prototypes
+ccflags-y += -I$(srctree)/drivers/kernelsu -I$(srctree)/drivers/kernelsu/include
+obj-y += core.o elf.o hook.o syscall.o compat.o kpm.o
+obj-y += compact.o super_access.o abi_symbols.o compact_lookup.o
+obj-y += arch/arm64/

@@ -450,6 +450,7 @@ void srcutorture_get_gp_data(enum rcutorture_type test_type,
 #endif
 
 #ifdef CONFIG_TINY_RCU
+static inline bool rcu_dynticks_zero_in_eqs(int cpu, int *vp) { return false; }
 static inline unsigned long rcu_batches_started(void) { return 0; }
 static inline unsigned long rcu_batches_started_bh(void) { return 0; }
 static inline unsigned long rcu_batches_started_sched(void) { return 0; }
@@ -465,6 +466,7 @@ static inline void rcu_bh_force_quiescent_state(void) { }
 static inline void rcu_sched_force_quiescent_state(void) { }
 static inline void show_rcu_gp_kthreads(void) { }
 #else /* #ifdef CONFIG_TINY_RCU */
+bool rcu_dynticks_zero_in_eqs(int cpu, int *vp);
 extern unsigned long rcutorture_testseq;
 extern unsigned long rcutorture_vernum;
 unsigned long rcu_batches_started(void);

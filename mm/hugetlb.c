@@ -1373,6 +1373,8 @@ static void prep_compound_gigantic_page(struct page *page, unsigned int order)
 		set_compound_head(p, page);
 	}
 	atomic_set(compound_mapcount_ptr(page), -1);
+	if (hpage_pincount_available(page))
+		atomic_set(compound_pincount_ptr(page), 0);
 }
 
 /*
@@ -4418,7 +4420,23 @@ long follow_hugetlb_page(struct mm_struct *mm, struct vm_area_struct *vma,
 same_page:
 		if (pages) {
 			pages[i] = mem_map_offset(page, pfn_offset);
-			get_page(pages[i]);
+			if (unlikely(!try_grab_page(pages[i], flags))) {
+				pages[i] = NULL;
+				spin_unlock(ptl);
+				remainder = 0;
+				err = -ENOMEM;
+				break;
+			}
+			if (flags & FOLL_PIN) {
+				err = arch_make_page_accessible(pages[i]);
+				if (err) {
+					unpin_user_page(pages[i]);
+					pages[i] = NULL;
+					spin_unlock(ptl);
+					remainder = 0;
+					break;
+				}
+			}
 		}
 
 		if (vmas)
@@ -4985,8 +5003,9 @@ retry:
 	pte = huge_ptep_get((pte_t *)pmd);
 	if (pte_present(pte)) {
 		page = pmd_page(*pmd) + ((address & ~PMD_MASK) >> PAGE_SHIFT);
-		if (flags & FOLL_GET)
-			get_page(page);
+		if ((flags & (FOLL_GET | FOLL_PIN)) &&
+		    unlikely(!try_grab_page(page, flags)))
+			page = ERR_PTR(-ENOMEM);
 	} else {
 		if (is_hugetlb_entry_migration(pte)) {
 			spin_unlock(ptl);
@@ -5007,19 +5026,27 @@ struct page * __weak
 follow_huge_pud(struct mm_struct *mm, unsigned long address,
 		pud_t *pud, int flags)
 {
-	if (flags & FOLL_GET)
-		return NULL;
+	struct page *page;
 
-	return pte_page(*(pte_t *)pud) + ((address & ~PUD_MASK) >> PAGE_SHIFT);
+	page = pte_page(*(pte_t *)pud) + ((address & ~PUD_MASK) >> PAGE_SHIFT);
+	if ((flags & (FOLL_GET | FOLL_PIN)) &&
+	    unlikely(!try_grab_page(page, flags)))
+		return ERR_PTR(-ENOMEM);
+	return page;
+
 }
 
 struct page * __weak
 follow_huge_pgd(struct mm_struct *mm, unsigned long address, pgd_t *pgd, int flags)
 {
-	if (flags & FOLL_GET)
-		return NULL;
+	struct page *page;
 
-	return pte_page(*(pte_t *)pgd) + ((address & ~PGDIR_MASK) >> PAGE_SHIFT);
+	page = pte_page(*(pte_t *)pgd) + ((address & ~PGDIR_MASK) >> PAGE_SHIFT);
+	if ((flags & (FOLL_GET | FOLL_PIN)) &&
+	    unlikely(!try_grab_page(page, flags)))
+		return ERR_PTR(-ENOMEM);
+	return page;
+
 }
 
 bool isolate_huge_page(struct page *page, struct list_head *list)

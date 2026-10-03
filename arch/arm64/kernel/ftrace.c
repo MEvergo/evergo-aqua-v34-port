@@ -65,82 +65,148 @@ int ftrace_update_ftrace_func(ftrace_func_t func)
 	return ftrace_modify_code(pc, 0, new, false);
 }
 
+#ifdef CONFIG_ARM64_MODULE_PLTS
+static struct plt_entry *get_ftrace_plt(struct module *mod,
+					unsigned long addr)
+{
+	struct plt_entry *plt = mod->arch.ftrace_trampolines;
+
+	if (addr == FTRACE_ADDR)
+		return &plt[FTRACE_PLT_IDX];
+	if (addr == FTRACE_REGS_ADDR &&
+	    IS_ENABLED(CONFIG_DYNAMIC_FTRACE_WITH_REGS))
+		return &plt[FTRACE_REGS_PLT_IDX];
+	return NULL;
+}
+#endif
+
+static int ftrace_resolve_call_addr(struct dyn_ftrace *rec,
+				    struct module *mod, unsigned long pc,
+				    unsigned long addr,
+				    unsigned long *target)
+{
+	long offset;
+
+	if (IS_ENABLED(CONFIG_DYNAMIC_FTRACE_WITH_DIRECT_CALLS) &&
+	    (rec->flags & FTRACE_FL_DIRECT) &&
+	    ((long)addr - (long)pc < -SZ_128M ||
+	     (long)addr - (long)pc >= SZ_128M))
+		addr = FTRACE_REGS_ADDR;
+
+	offset = (long)addr - (long)pc;
+	if (offset >= -SZ_128M && offset < SZ_128M) {
+		*target = addr;
+		return 0;
+	}
+
+#ifdef CONFIG_ARM64_MODULE_PLTS
+	if (!mod) {
+		preempt_disable();
+		mod = __module_text_address(pc);
+		preempt_enable();
+	}
+	if (!mod)
+		return -EINVAL;
+
+	{
+		struct plt_entry *plt = get_ftrace_plt(mod, addr);
+		struct plt_entry trampoline;
+
+		if (!plt)
+			return -EINVAL;
+
+		trampoline = get_plt_entry(addr);
+		if (!plt_entries_equal(plt, &trampoline)) {
+			if (!plt_entries_equal(plt, &(struct plt_entry){}))
+				return -EINVAL;
+
+			module_disable_ro(mod);
+			*plt = trampoline;
+			module_enable_ro(mod, true);
+			flush_icache_range((unsigned long)plt,
+					   (unsigned long)(plt + 1));
+		}
+		*target = (unsigned long)plt;
+		return 0;
+	}
+#else
+	return -EINVAL;
+#endif
+}
 /*
  * Turn on the call to ftrace_caller() in instrumented function
  */
 int ftrace_make_call(struct dyn_ftrace *rec, unsigned long addr)
 {
 	unsigned long pc = rec->ip;
+	unsigned long target;
 	u32 old, new;
-	long offset = (long)addr - (long)pc;
+	int ret;
 
-	if (offset < -SZ_128M || offset >= SZ_128M) {
-#ifdef CONFIG_ARM64_MODULE_PLTS
-		struct plt_entry trampoline, *dst;
-		struct module *mod;
-
-		/*
-		 * On kernels that support module PLTs, the offset between the
-		 * branch instruction and its target may legally exceed the
-		 * range of an ordinary relative 'bl' opcode. In this case, we
-		 * need to branch via a trampoline in the module.
-		 *
-		 * NOTE: __module_text_address() must be called with preemption
-		 * disabled, but we can rely on ftrace_lock to ensure that 'mod'
-		 * retains its validity throughout the remainder of this code.
-		 */
-		preempt_disable();
-		mod = __module_text_address(pc);
-		preempt_enable();
-
-		if (WARN_ON(!mod))
-			return -EINVAL;
-
-		/*
-		 * There is only one ftrace trampoline per module. For now,
-		 * this is not a problem since on arm64, all dynamic ftrace
-		 * invocations are routed via ftrace_caller(). This will need
-		 * to be revisited if support for multiple ftrace entry points
-		 * is added in the future, but for now, the pr_err() below
-		 * deals with a theoretical issue only.
-		 */
-		dst = mod->arch.ftrace_trampoline;
-		trampoline = get_plt_entry(addr);
-		if (!plt_entries_equal(dst, &trampoline)) {
-			if (!plt_entries_equal(dst, &(struct plt_entry){})) {
-				pr_err("ftrace: far branches to multiple entry points unsupported inside a single module\n");
-				return -EINVAL;
-			}
-
-			/* point the trampoline to our ftrace entry point */
-			module_disable_ro(mod);
-			*dst = trampoline;
-			module_enable_ro(mod, true);
-
-			/*
-			 * Ensure updated trampoline is visible to instruction
-			 * fetch before we patch in the branch. Although the
-			 * architecture doesn't require an IPI in this case,
-			 * Neoverse-N1 erratum #1542419 does require one
-			 * if the TLB maintenance in module_enable_ro() is
-			 * skipped due to rodata_enabled. It doesn't seem worth
-			 * it to make it conditional given that this is
-			 * certainly not a fast-path.
-			 */
-			flush_icache_range((unsigned long)&dst[0],
-					   (unsigned long)&dst[1]);
-		}
-		addr = (unsigned long)dst;
-#else /* CONFIG_ARM64_MODULE_PLTS */
-		return -EINVAL;
-#endif /* CONFIG_ARM64_MODULE_PLTS */
-	}
+	ret = ftrace_resolve_call_addr(rec, NULL, pc, addr, &target);
+	if (ret)
+		return ret;
 
 	old = aarch64_insn_gen_nop();
-	new = aarch64_insn_gen_branch_imm(pc, addr, AARCH64_INSN_BRANCH_LINK);
+	new = aarch64_insn_gen_branch_imm(pc, target,
+					  AARCH64_INSN_BRANCH_LINK);
+	if (new == AARCH64_BREAK_FAULT)
+		return -EINVAL;
 
+	ret = ftrace_modify_code(pc, old, new, true);
+	if (!ret)
+		rec->arch.ftrace_call_target = target;
+	return ret;
+}
+
+#ifdef CONFIG_DYNAMIC_FTRACE_WITH_REGS
+int ftrace_modify_call(struct dyn_ftrace *rec, unsigned long old_addr,
+		       unsigned long addr)
+{
+	unsigned long pc = rec->ip;
+	unsigned long old_target, target;
+	u32 old, new;
+	int ret;
+
+	old_target = rec->arch.ftrace_call_target;
+	if (!old_target) {
+		ret = ftrace_resolve_call_addr(rec, NULL, pc, old_addr,
+					       &old_target);
+		if (ret)
+			return ret;
+	}
+	ret = ftrace_resolve_call_addr(rec, NULL, pc, addr, &target);
+	if (ret)
+		return ret;
+
+	old = aarch64_insn_gen_branch_imm(pc, old_target,
+					  AARCH64_INSN_BRANCH_LINK);
+	new = aarch64_insn_gen_branch_imm(pc, target,
+					  AARCH64_INSN_BRANCH_LINK);
+	if (old == AARCH64_BREAK_FAULT || new == AARCH64_BREAK_FAULT)
+		return -EINVAL;
+
+	ret = ftrace_modify_code(pc, old, new, true);
+	if (!ret)
+		rec->arch.ftrace_call_target = target;
+	return ret;
+}
+#endif
+#ifdef CONFIG_DYNAMIC_FTRACE_WITH_REGS
+int ftrace_init_nop(struct module *mod, struct dyn_ftrace *rec)
+{
+	unsigned long pc = rec->ip - AARCH64_INSN_SIZE;
+	u32 old = aarch64_insn_gen_nop();
+	u32 new;
+
+	(void)mod;
+	new = aarch64_insn_gen_add_sub_imm(AARCH64_INSN_REG_9,
+					    AARCH64_INSN_REG_LR, 0,
+					    AARCH64_INSN_VARIANT_64BIT,
+					    AARCH64_INSN_ADSB_ADD);
 	return ftrace_modify_code(pc, old, new, true);
 }
+#endif
 
 /*
  * Turn off the call to ftrace_caller() in instrumented function
@@ -149,55 +215,27 @@ int ftrace_make_nop(struct module *mod, struct dyn_ftrace *rec,
 		    unsigned long addr)
 {
 	unsigned long pc = rec->ip;
-	bool validate = true;
-	u32 old = 0, new;
-	long offset = (long)addr - (long)pc;
+	unsigned long target;
+	u32 old, new;
+	int ret;
 
-	if (offset < -SZ_128M || offset >= SZ_128M) {
-#ifdef CONFIG_ARM64_MODULE_PLTS
-		u32 replaced;
-
-		/*
-		 * 'mod' is only set at module load time, but if we end up
-		 * dealing with an out-of-range condition, we can assume it
-		 * is due to a module being loaded far away from the kernel.
-		 */
-		if (!mod) {
-			preempt_disable();
-			mod = __module_text_address(pc);
-			preempt_enable();
-
-			if (WARN_ON(!mod))
-				return -EINVAL;
-		}
-
-		/*
-		 * The instruction we are about to patch may be a branch and
-		 * link instruction that was redirected via a PLT entry. In
-		 * this case, the normal validation will fail, but we can at
-		 * least check that we are dealing with a branch and link
-		 * instruction that points into the right module.
-		 */
-		if (aarch64_insn_read((void *)pc, &replaced))
-			return -EFAULT;
-
-		if (!aarch64_insn_is_bl(replaced) ||
-		    !within_module(pc + aarch64_get_branch_offset(replaced),
-				   mod))
-			return -EINVAL;
-
-		validate = false;
-#else /* CONFIG_ARM64_MODULE_PLTS */
-		return -EINVAL;
-#endif /* CONFIG_ARM64_MODULE_PLTS */
-	} else {
-		old = aarch64_insn_gen_branch_imm(pc, addr,
-						  AARCH64_INSN_BRANCH_LINK);
+	target = rec->arch.ftrace_call_target;
+	if (!target) {
+		ret = ftrace_resolve_call_addr(rec, mod, pc, addr, &target);
+		if (ret)
+			return ret;
 	}
 
+	old = aarch64_insn_gen_branch_imm(pc, target,
+					  AARCH64_INSN_BRANCH_LINK);
+	if (old == AARCH64_BREAK_FAULT)
+		return -EINVAL;
 	new = aarch64_insn_gen_nop();
 
-	return ftrace_modify_code(pc, old, new, validate);
+	ret = ftrace_modify_code(pc, old, new, true);
+	if (!ret)
+		rec->arch.ftrace_call_target = 0;
+	return ret;
 }
 
 void arch_ftrace_update_code(int command)

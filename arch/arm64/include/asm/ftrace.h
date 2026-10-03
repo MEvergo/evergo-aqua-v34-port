@@ -11,9 +11,19 @@
 #ifndef __ASM_FTRACE_H
 #define __ASM_FTRACE_H
 
+#include <asm/ptrace.h>
 #include <asm/insn.h>
 
+
+#ifdef CONFIG_DYNAMIC_FTRACE_WITH_REGS
+#define ARCH_SUPPORTS_FTRACE_OPS 1
+#else
 #define MCOUNT_ADDR		((unsigned long)_mcount)
+#endif
+
+#define FTRACE_PLT_IDX		0
+#define FTRACE_REGS_PLT_IDX	1
+#define NR_FTRACE_PLTS		2
 #define MCOUNT_INSN_SIZE	AARCH64_INSN_SIZE
 
 #ifndef __ASSEMBLY__
@@ -23,21 +33,34 @@ extern void _mcount(unsigned long);
 extern void *return_address(unsigned int);
 
 struct dyn_arch_ftrace {
-	/* No extra data needed for arm64 */
+	unsigned long ftrace_call_target;
 };
-
 extern unsigned long ftrace_graph_call;
 
 extern void return_to_handler(void);
 
 static inline unsigned long ftrace_call_adjust(unsigned long addr)
 {
-	/*
-	 * addr is the address of the mcount call instruction.
-	 * recordmcount does the necessary offset calculation.
-	 */
+	if (IS_ENABLED(CONFIG_DYNAMIC_FTRACE_WITH_REGS))
+		return addr + AARCH64_INSN_SIZE;
 	return addr;
 }
+
+#ifdef CONFIG_DYNAMIC_FTRACE_WITH_REGS
+struct dyn_ftrace;
+struct module;
+int ftrace_init_nop(struct module *mod, struct dyn_ftrace *rec);
+#define ftrace_init_nop ftrace_init_nop
+#endif
+
+#ifdef CONFIG_HAVE_DYNAMIC_FTRACE_WITH_DIRECT_CALLS
+static inline void arch_ftrace_set_direct_caller(struct pt_regs *regs,
+						 unsigned long addr)
+{
+	regs->orig_x0 = 1;
+	regs->pc = addr;
+}
+#endif
 
 #define ftrace_return_address(n) return_address(n)
 

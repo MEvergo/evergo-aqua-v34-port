@@ -149,11 +149,8 @@ DEFINE_MEMBER(task_struct, parent)
 DEFINE_MEMBER(task_struct, group_leader)
 DEFINE_MEMBER(task_struct, mm)
 DEFINE_MEMBER(task_struct, active_mm)
-#if LINUX_VERSION_CODE < KERNEL_VERSION(4, 19, 0)
-DEFINE_MEMBER(task_struct, pids[PIDTYPE_PID].pid)
-#else
+/* This 4.14 vendor tree backports task_struct.thread_pid. */
 DEFINE_MEMBER(task_struct, thread_pid)
-#endif
 DEFINE_MEMBER(task_struct, files)
 DEFINE_MEMBER(task_struct, seccomp)
 #ifdef CONFIG_THREAD_INFO_IN_TASK
@@ -190,6 +187,8 @@ static struct DynamicStructInfo *dynamic_struct_infos[] = {
 int sukisu_super_find_struct(const char *struct_name, size_t *out_size,
                              int *out_members)
 {
+    if (!struct_name)
+        return -1;
     for (size_t i = 0;
          i < (sizeof(dynamic_struct_infos) / sizeof(dynamic_struct_infos[0]));
          i++) {
@@ -219,6 +218,8 @@ EXPORT_SYMBOL(sukisu_super_find_struct);
 int sukisu_super_access(const char *struct_name, const char *member_name,
                         size_t *out_offset, size_t *out_size)
 {
+    if (!struct_name || !member_name)
+        return -1;
     for (size_t i = 0;
          i < (sizeof(dynamic_struct_infos) / sizeof(dynamic_struct_infos[0]));
          i++) {
@@ -228,10 +229,10 @@ int sukisu_super_access(const char *struct_name, const char *member_name,
             for (size_t i1 = 0; i1 < info->count; i1++) {
                 if (strcmp(info->members[i1].name, member_name) == 0) {
                     if (out_offset)
-                        *out_offset = info->members[i].offset;
+                        *out_offset = info->members[i1].offset;
 
                     if (out_size)
-                        *out_size = info->members[i].size;
+                        *out_size = info->members[i1].size;
 
                     return 0;
                 }
@@ -245,8 +246,6 @@ int sukisu_super_access(const char *struct_name, const char *member_name,
 }
 EXPORT_SYMBOL(sukisu_super_access);
 
-#define DYNAMIC_CONTAINER_OF(offset, member_ptr)                               \
-    ({ (offset != (size_t)-1) ? (void *)((char *)(member_ptr)-offset) : NULL; })
 
 /*
  * Dynamic container_of
@@ -257,7 +256,7 @@ EXPORT_SYMBOL(sukisu_super_access);
 int sukisu_super_container_of(const char *struct_name, const char *member_name,
                               void *ptr, void **out_ptr)
 {
-    if (ptr == NULL)
+    if (!struct_name || !member_name || !ptr || !out_ptr)
         return -3;
 
     for (size_t i = 0;
@@ -268,8 +267,10 @@ int sukisu_super_container_of(const char *struct_name, const char *member_name,
         if (strcmp(struct_name, info->name) == 0) {
             for (size_t i1 = 0; i1 < info->count; i1++) {
                 if (strcmp(info->members[i1].name, member_name) == 0) {
-                    *out_ptr = (void *)DYNAMIC_CONTAINER_OF(
-                        info->members[i1].offset, ptr);
+                    if ((unsigned long)ptr < info->members[i1].offset)
+                        return -3;
+                    *out_ptr =
+                        (char *)ptr - info->members[i1].offset;
 
                     return 0;
                 }

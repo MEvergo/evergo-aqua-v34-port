@@ -177,6 +177,12 @@ static inline struct ipc_security_struct *selinux_ipc(
 {
 	return ipc->security + selinux_blob_sizes.lbs_ipc;
 }
+static inline struct superblock_security_struct *selinux_superblock(
+					const struct super_block *superblock)
+{
+	return superblock->s_security + selinux_blob_sizes.lbs_superblock;
+}
+
 
 /*
  * get the subjective security ID of the current task

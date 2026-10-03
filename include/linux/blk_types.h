@@ -258,6 +258,7 @@ enum req_flag_bits {
 	__REQ_NOUNMAP,		/* do not free blocks when zeroing */
 
 	__REQ_NOWAIT,           /* Don't wait if request will block */
+	__REQ_HIPRI,		/* polling I/O */
 #ifdef MTK_UFS_HQA
 	__REQ_POWER_LOSS,	/* MTK PATCH for SPOH */
 #endif
@@ -280,6 +281,7 @@ enum req_flag_bits {
 
 #define REQ_NOUNMAP		(1ULL << __REQ_NOUNMAP)
 #define REQ_NOWAIT		(1ULL << __REQ_NOWAIT)
+#define REQ_HIPRI		(1ULL << __REQ_HIPRI)
 
 #ifdef MTK_UFS_HQA
 /* MTK PATCH for SPOH */

@@ -459,6 +459,11 @@ asmlinkage long compat_sys_adjtimex(struct compat_timex __user *utp);
 
 extern void sigset_from_compat(sigset_t *set, const compat_sigset_t *compat);
 extern void sigset_to_compat(compat_sigset_t *compat, const sigset_t *set);
+extern int get_compat_sigset(sigset_t *set,
+			    const compat_sigset_t __user *compat);
+extern int set_compat_user_sigmask(const compat_sigset_t __user *umask,
+				   size_t sigsetsize);
+
 
 asmlinkage long compat_sys_migrate_pages(compat_pid_t pid,
 		compat_ulong_t maxnode, const compat_ulong_t __user *old_nodes,

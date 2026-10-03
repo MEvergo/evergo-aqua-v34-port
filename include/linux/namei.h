@@ -47,6 +47,15 @@ enum {LAST_NORM, LAST_ROOT, LAST_DOT, LAST_DOTDOT, LAST_BIND};
 #define LOOKUP_EMPTY		0x4000
 #define LOOKUP_DOWN		0x8000
 
+#define LOOKUP_NO_SYMLINKS	0x010000
+#define LOOKUP_NO_MAGICLINKS	0x020000
+#define LOOKUP_NO_XDEV		0x040000
+#define LOOKUP_BENEATH		0x080000
+#define LOOKUP_IN_ROOT		0x100000
+#define LOOKUP_CACHED		0x200000
+
+#define LOOKUP_IS_SCOPED	(LOOKUP_BENEATH | LOOKUP_IN_ROOT)
+
 extern int path_pts(struct path *path);
 
 extern int user_path_at_empty(int, const char __user *, unsigned, struct path *, int *empty);
@@ -94,7 +103,7 @@ extern int follow_up(struct path *);
 extern struct dentry *lock_rename(struct dentry *, struct dentry *);
 extern void unlock_rename(struct dentry *, struct dentry *);
 
-extern void nd_jump_link(struct path *path);
+extern int nd_jump_link(struct path *path);
 
 static inline void nd_terminate_link(void *name, size_t len, size_t maxlen)
 {

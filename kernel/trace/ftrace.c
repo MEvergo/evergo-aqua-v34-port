@@ -1435,22 +1435,14 @@ ftrace_hash_rec_enable_modify(struct ftrace_ops *ops, int filter_hash);
 static int ftrace_hash_ipmodify_update(struct ftrace_ops *ops,
 				       struct ftrace_hash *new_hash);
 
-static struct ftrace_hash *
-__ftrace_hash_move(struct ftrace_hash *src)
+static struct ftrace_hash *dup_hash(struct ftrace_hash *src, int size)
 {
 	struct ftrace_func_entry *entry;
 	struct hlist_node *tn;
 	struct hlist_head *hhd;
 	struct ftrace_hash *new_hash;
-	int size = src->count;
 	int bits = 0;
 	int i;
-
-	/*
-	 * If the new source is empty, just return the empty_hash.
-	 */
-	if (ftrace_hash_empty(src))
-		return EMPTY_HASH;
 
 	/*
 	 * Make the hash size about 1/2 the # found
@@ -1478,6 +1470,14 @@ __ftrace_hash_move(struct ftrace_hash *src)
 	}
 
 	return new_hash;
+}
+
+static struct ftrace_hash *
+__ftrace_hash_move(struct ftrace_hash *src)
+{
+	if (ftrace_hash_empty(src))
+		return EMPTY_HASH;
+	return dup_hash(src, src->count);
 }
 
 static int
@@ -1599,6 +1599,27 @@ static int ftrace_cmp_recs(const void *a, const void *b)
 	return 0;
 }
 
+
+static struct dyn_ftrace *lookup_rec(unsigned long start, unsigned long end)
+{
+	struct ftrace_page *pg;
+	struct dyn_ftrace *rec;
+	struct dyn_ftrace key;
+
+	key.ip = start;
+	key.flags = end;
+	for (pg = ftrace_pages_start; pg; pg = pg->next) {
+		if (pg->index == 0 ||
+		    end < pg->records[0].ip ||
+		    start >= pg->records[pg->index - 1].ip + MCOUNT_INSN_SIZE)
+			continue;
+		rec = bsearch(&key, pg->records, pg->index, sizeof(*rec),
+			      ftrace_cmp_recs);
+		if (rec)
+			return rec;
+	}
+	return NULL;
+}
 /**
  * ftrace_location_range - return the first address of a traced location
  *	if it touches the given ip range
@@ -1613,26 +1634,9 @@ static int ftrace_cmp_recs(const void *a, const void *b)
  */
 unsigned long ftrace_location_range(unsigned long start, unsigned long end)
 {
-	struct ftrace_page *pg;
-	struct dyn_ftrace *rec;
-	struct dyn_ftrace key;
+	struct dyn_ftrace *rec = lookup_rec(start, end);
 
-	key.ip = start;
-	key.flags = end;	/* overload flags, as it is unsigned long */
-
-	for (pg = ftrace_pages_start; pg; pg = pg->next) {
-		if (pg->index == 0 ||
-		    end < pg->records[0].ip ||
-		    start >= (pg->records[pg->index - 1].ip + MCOUNT_INSN_SIZE))
-			continue;
-		rec = bsearch(&key, pg->records, pg->index,
-			      sizeof(struct dyn_ftrace),
-			      ftrace_cmp_recs);
-		if (rec)
-			return rec->ip;
-	}
-
-	return 0;
+	return rec ? rec->ip : 0;
 }
 
 /**
@@ -2702,7 +2706,11 @@ ftrace_code_disable(struct module *mod, struct dyn_ftrace *rec)
 	if (unlikely(ftrace_disabled))
 		return 0;
 
+#ifdef CONFIG_HAVE_PATCHABLE_FUNCTION_ENTRY
+	ret = ftrace_init_nop(mod, rec);
+#else
 	ret = ftrace_make_nop(mod, rec, MCOUNT_ADDR);
+#endif
 	if (ret) {
 		ftrace_bug_type = FTRACE_BUG_INIT;
 		ftrace_bug(ret, rec);

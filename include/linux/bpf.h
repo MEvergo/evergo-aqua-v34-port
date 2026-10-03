@@ -612,6 +612,10 @@ struct bpf_trampoline {
 	/* Executable image of trampoline */
 	void *image;
 	u64 selector;
+	/* Failed text updates keep the trampoline and active programs alive. */
+	bool quarantined;
+	/* Target program retained if a quarantined callsite lives in its text. */
+	struct bpf_prog *quarantined_tgt_prog;
 	struct bpf_ksym ksym;
 };
 

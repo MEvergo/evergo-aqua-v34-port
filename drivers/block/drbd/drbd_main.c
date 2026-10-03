@@ -1865,7 +1865,7 @@ int drbd_send(struct drbd_connection *connection, struct socket *sock,
 	msg.msg_controllen = 0;
 	msg.msg_flags      = msg_flags | MSG_NOSIGNAL;
 
-	iov_iter_kvec(&msg.msg_iter, WRITE | ITER_KVEC, &iov, 1, size);
+	iov_iter_kvec(&msg.msg_iter, WRITE, &iov, 1, size);
 
 	if (sock == connection->data.socket) {
 		rcu_read_lock();

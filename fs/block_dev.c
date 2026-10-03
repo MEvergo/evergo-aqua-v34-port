@@ -240,6 +240,7 @@ __blkdev_direct_IO_simple(struct kiocb *iocb, struct iov_iter *iter,
 	bio_set_dev(&bio, bdev);
 	bio.bi_iter.bi_sector = pos >> 9;
 	bio.bi_write_hint = iocb->ki_hint;
+	bio.bi_ioprio = iocb->ki_ioprio;
 	bio.bi_private = current;
 	bio.bi_end_io = blkdev_bio_end_io_simple;
 
@@ -256,6 +257,10 @@ __blkdev_direct_IO_simple(struct kiocb *iocb, struct iov_iter *iter,
 		bio.bi_opf = dio_bio_write_op(iocb);
 		task_io_account_write(ret);
 	}
+	if (iocb->ki_flags & IOCB_HIPRI)
+		bio.bi_opf |= REQ_HIPRI;
+	if (iocb->ki_flags & IOCB_NOWAIT)
+		bio.bi_opf |= REQ_NOWAIT;
 
 	qc = submit_bio(&bio);
 	for (;;) {
@@ -353,6 +358,7 @@ __blkdev_direct_IO(struct kiocb *iocb, struct iov_iter *iter, int nr_pages)
 	struct blkdev_dio *dio;
 	struct bio *bio;
 	bool is_read = (iov_iter_rw(iter) == READ), is_sync;
+	bool is_poll = iocb->ki_flags & IOCB_HIPRI;
 	loff_t pos = iocb->ki_pos;
 	blk_qc_t qc = BLK_QC_T_NONE;
 	int ret = 0;
@@ -375,11 +381,13 @@ __blkdev_direct_IO(struct kiocb *iocb, struct iov_iter *iter, int nr_pages)
 	dio->multi_bio = false;
 	dio->should_dirty = is_read && iter_is_iovec(iter);
 
-	blk_start_plug(&plug);
+	if (!is_poll)
+		blk_start_plug(&plug);
 	for (;;) {
 		bio_set_dev(bio, bdev);
 		bio->bi_iter.bi_sector = pos >> 9;
 		bio->bi_write_hint = iocb->ki_hint;
+		bio->bi_ioprio = iocb->ki_ioprio;
 		bio->bi_private = dio;
 		bio->bi_end_io = blkdev_bio_end_io;
 
@@ -398,6 +406,11 @@ __blkdev_direct_IO(struct kiocb *iocb, struct iov_iter *iter, int nr_pages)
 			bio->bi_opf = dio_bio_write_op(iocb);
 			task_io_account_write(bio->bi_iter.bi_size);
 		}
+		if (is_poll)
+			bio->bi_opf |= REQ_HIPRI;
+		if ((iocb->ki_flags & IOCB_NOWAIT) ||
+		    (is_poll && !is_sync))
+			bio->bi_opf |= REQ_NOWAIT;
 
 		dio->size += bio->bi_iter.bi_size;
 		pos += bio->bi_iter.bi_size;
@@ -405,6 +418,8 @@ __blkdev_direct_IO(struct kiocb *iocb, struct iov_iter *iter, int nr_pages)
 		nr_pages = iov_iter_npages(iter, BIO_MAX_PAGES);
 		if (!nr_pages) {
 			qc = submit_bio(bio);
+			if (is_poll)
+				WRITE_ONCE(iocb->ki_cookie, qc);
 			break;
 		}
 
@@ -418,7 +433,8 @@ __blkdev_direct_IO(struct kiocb *iocb, struct iov_iter *iter, int nr_pages)
 		submit_bio(bio);
 		bio = bio_alloc(GFP_KERNEL, nr_pages);
 	}
-	blk_finish_plug(&plug);
+	if (!is_poll)
+		blk_finish_plug(&plug);
 
 	if (!is_sync)
 		return -EIOCBQUEUED;
@@ -455,6 +471,17 @@ blkdev_direct_IO(struct kiocb *iocb, struct iov_iter *iter)
 		return __blkdev_direct_IO_simple(iocb, iter, nr_pages);
 
 	return __blkdev_direct_IO(iocb, iter, min(nr_pages, BIO_MAX_PAGES));
+}
+
+static int blkdev_iopoll(struct kiocb *iocb, bool spin)
+{
+	struct block_device *bdev = I_BDEV(bdev_file_inode(iocb->ki_filp));
+	blk_qc_t cookie = READ_ONCE(iocb->ki_cookie);
+
+	(void)spin;
+	if (!blk_qc_t_valid(cookie))
+		return 0;
+	return blk_mq_poll(bdev_get_queue(bdev), cookie);
 }
 
 static __init int blkdev_init(void)
@@ -2082,6 +2109,7 @@ const struct file_operations def_blk_fops = {
 	.read_iter	= blkdev_read_iter,
 	.write_iter	= blkdev_write_iter,
 	.mmap		= generic_file_mmap,
+	.iopoll		= blkdev_iopoll,
 	.fsync		= blkdev_fsync,
 	.unlocked_ioctl	= block_ioctl,
 #ifdef CONFIG_COMPAT

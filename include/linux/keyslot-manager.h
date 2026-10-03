@@ -8,6 +8,8 @@
 
 #include <linux/bio.h>
 
+struct device;
+
 /* Inline crypto feature bits.  Must set at least one. */
 enum {
 	/* Support for standard software-specified keys */

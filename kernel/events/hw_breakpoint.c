@@ -46,6 +46,8 @@
 #include <linux/smp.h>
 
 #include <linux/hw_breakpoint.h>
+#include "internal.h"
+
 /*
  * Constraints data
  */
@@ -369,24 +371,38 @@ int dbg_release_bp_slot(struct perf_event *bp)
 
 static int validate_hw_breakpoint(struct perf_event *bp)
 {
+#ifdef CONFIG_ARM64
+	struct arch_hw_breakpoint previous = *counter_arch_bp(bp);
+#endif
 	int ret;
 
 	ret = arch_validate_hwbkpt_settings(bp);
 	if (ret)
-		return ret;
+		goto failed;
 
 	if (arch_check_bp_in_kernelspace(bp)) {
-		if (bp->attr.exclude_kernel)
-			return -EINVAL;
+		if (bp->attr.exclude_kernel) {
+			ret = -EINVAL;
+			goto failed;
+		}
 		/*
 		 * Don't let unprivileged users set a breakpoint in the trap
 		 * path to avoid trap recursion attacks.
 		 */
-		if (!capable(CAP_SYS_ADMIN))
-			return -EPERM;
+		if (!capable(CAP_SYS_ADMIN)) {
+			ret = -EPERM;
+			goto failed;
+		}
 	}
 
 	return 0;
+
+failed:
+#ifdef CONFIG_ARM64
+	/* Keep the queried register configuration valid after any failed check. */
+	*counter_arch_bp(bp) = previous;
+#endif
+	return ret;
 }
 
 int register_perf_hw_breakpoint(struct perf_event *bp)
@@ -424,12 +440,114 @@ register_user_hw_breakpoint(struct perf_event_attr *attr,
 EXPORT_SYMBOL_GPL(register_user_hw_breakpoint);
 
 /**
+ * register_user_hw_breakpoint_flags - register a user-space hardware breakpoint
+ * @attr: breakpoint attributes
+ * @triggered: callback to trigger when the breakpoint is hit
+ * @context: callback context
+ * @tsk: task to which the address belongs
+ * @flags: kernel-only hardware breakpoint behavior flags
+ *
+ * Creates the event disabled and stores @flags before publishing it to the
+ * task, so neither a concurrent fork nor enable-on-exec can see an event
+ * without its flags.  @attr is not modified.  Flags are retained across
+ * breakpoint modifications and inherited with the callback on fork.
+ *
+ * Return: a pointer to the event, or an ERR_PTR() on failure.
+ */
+struct perf_event *
+register_user_hw_breakpoint_flags(struct perf_event_attr *attr,
+				  perf_overflow_handler_t triggered,
+				  void *context,
+				  struct task_struct *tsk,
+				  unsigned long flags)
+{
+	struct perf_event_attr disabled_attr;
+	bool disabled;
+
+	if (flags & ~HW_BREAKPOINT_FLAG_STEP_ON_HIT)
+		return ERR_PTR(-EINVAL);
+
+	disabled_attr = *attr;
+	disabled = disabled_attr.disabled;
+	disabled_attr.disabled = 1;
+	return perf_event_create_kernel_counter_flags(&disabled_attr, -1, tsk,
+						      triggered, context,
+						      flags, !disabled);
+}
+EXPORT_SYMBOL_GPL(register_user_hw_breakpoint_flags);
+
+/**
+ * hw_breakpoint_get_resources - query total ARM64 BRP/WRP capacity
+ * @resources: output for per-CPU totals used by perf
+ *
+ * This does not reserve slots or report remaining capacity. It neither
+ * allocates nor sleeps, and leaves @resources unchanged on failure.
+ *
+ * Return: 0 on success, -EINVAL for a NULL output, -EAGAIN before resource
+ * initialization, or -EOPNOTSUPP on architectures without this query.
+ */
+int hw_breakpoint_get_resources(struct hw_breakpoint_resources *resources)
+{
+	if (!resources)
+		return -EINVAL;
+#ifdef CONFIG_ARM64
+	if (!smp_load_acquire(&constraints_initialized))
+		return -EAGAIN;
+
+	resources->brps = nr_slots[TYPE_INST];
+	resources->wrps = nr_slots[TYPE_DATA];
+	return 0;
+#else
+	return -EOPNOTSUPP;
+#endif
+}
+EXPORT_SYMBOL_GPL(hw_breakpoint_get_resources);
+
+/**
+ * hw_breakpoint_get_config - query a validated ARM64 address/BAS pair
+ * @bp: live hardware-breakpoint event
+ * @config: output for the cached, normalized register configuration
+ *
+ * The caller must keep @bp alive and serialize this query against
+ * modification, rollback and removal. It neither allocates nor sleeps.
+ * It does not change the event or read the CPU's live debug registers.
+ *
+ * A disabled-only modification defers validation in this kernel, so this
+ * returns the prior validated configuration until an enabled modification
+ * validates the new attributes. Failed validation preserves that cache.
+ *
+ * Return: 0 on success, -EINVAL for invalid arguments or a non-breakpoint
+ * event, or -EOPNOTSUPP on architectures without this query. Failures leave
+ * @config unchanged.
+ */
+int hw_breakpoint_get_config(struct perf_event *bp,
+			     struct hw_breakpoint_config *config)
+{
+	if (IS_ERR_OR_NULL(bp) || !config ||
+	    bp->attr.type != PERF_TYPE_BREAKPOINT)
+		return -EINVAL;
+#ifdef CONFIG_ARM64
+	config->address = bp->hw.info.address;
+	config->bas = bp->hw.info.ctrl.len;
+	return 0;
+#else
+	return -EOPNOTSUPP;
+#endif
+}
+EXPORT_SYMBOL_GPL(hw_breakpoint_get_config);
+
+/**
  * modify_user_hw_breakpoint - modify a user-space hardware breakpoint
  * @bp: the breakpoint structure to modify
  * @attr: new breakpoint attributes
  */
 int modify_user_hw_breakpoint(struct perf_event *bp, struct perf_event_attr *attr)
 {
+	u64 old_bp_addr = bp->attr.bp_addr;
+	u64 old_bp_type = bp->attr.bp_type;
+	u64 old_bp_len = bp->attr.bp_len;
+	bool old_disabled = bp->attr.disabled;
+	bool was_enabled = bp->state >= PERF_EVENT_STATE_INACTIVE;
 	/*
 	 * modify_user_hw_breakpoint can be invoked with IRQs disabled and hence it
 	 * will not be possible to raise IPIs that invoke __perf_event_disable.
@@ -449,8 +567,15 @@ int modify_user_hw_breakpoint(struct perf_event *bp, struct perf_event_attr *att
 	if (!attr->disabled) {
 		int err = validate_hw_breakpoint(bp);
 
-		if (err)
+		if (err) {
+			bp->attr.bp_addr = old_bp_addr;
+			bp->attr.bp_type = old_bp_type;
+			bp->attr.bp_len = old_bp_len;
+			bp->attr.disabled = old_disabled;
+			if (was_enabled)
+				perf_event_enable(bp);
 			return err;
+		}
 
 		perf_event_enable(bp);
 		bp->attr.disabled = 0;
@@ -619,7 +744,7 @@ int __init init_hw_breakpoint(void)
 		}
 	}
 
-	constraints_initialized = 1;
+	smp_store_release(&constraints_initialized, 1);
 
 	perf_pmu_register(&perf_breakpoint, "breakpoint", PERF_TYPE_BREAKPOINT);
 

@@ -32,10 +32,10 @@
 #include <linux/uaccess.h>
 #include <net/compat.h>
 
-int get_compat_msghdr(struct msghdr *kmsg,
-		      struct compat_msghdr __user *umsg,
-		      struct sockaddr __user **save_addr,
-		      struct iovec **iov)
+int __get_compat_msghdr(struct msghdr *kmsg,
+			struct compat_msghdr __user *umsg,
+			struct sockaddr __user **save_addr,
+			compat_uptr_t *ptr, compat_size_t *len)
 {
 	struct compat_msghdr msg;
 	ssize_t err;
@@ -45,19 +45,16 @@ int get_compat_msghdr(struct msghdr *kmsg,
 
 	kmsg->msg_flags = msg.msg_flags;
 	kmsg->msg_namelen = msg.msg_namelen;
-
 	if (!msg.msg_name)
 		kmsg->msg_namelen = 0;
-
 	if (kmsg->msg_namelen < 0)
 		return -EINVAL;
-
 	if (kmsg->msg_namelen > sizeof(struct sockaddr_storage))
 		kmsg->msg_namelen = sizeof(struct sockaddr_storage);
 
-	kmsg->msg_control = compat_ptr(msg.msg_control);
+	kmsg->msg_control_user = compat_ptr(msg.msg_control);
+	kmsg->msg_control_is_user = true;
 	kmsg->msg_controllen = msg.msg_controllen;
-
 	if (save_addr)
 		*save_addr = compat_ptr(msg.msg_name);
 
@@ -78,10 +75,26 @@ int get_compat_msghdr(struct msghdr *kmsg,
 		return -EMSGSIZE;
 
 	kmsg->msg_iocb = NULL;
+	*ptr = msg.msg_iov;
+	*len = msg.msg_iovlen;
+	return 0;
+}
 
-	return compat_import_iovec(save_addr ? READ : WRITE,
-				   compat_ptr(msg.msg_iov), msg.msg_iovlen,
-				   UIO_FASTIOV, iov, &kmsg->msg_iter);
+int get_compat_msghdr(struct msghdr *kmsg,
+		      struct compat_msghdr __user *umsg,
+		      struct sockaddr __user **save_addr,
+		      struct iovec **iov)
+{
+	compat_uptr_t ptr;
+	compat_size_t len;
+	ssize_t err;
+
+	err = __get_compat_msghdr(kmsg, umsg, save_addr, &ptr, &len);
+	if (err)
+		return err;
+	err = compat_import_iovec(save_addr ? READ : WRITE, compat_ptr(ptr),
+				  len, UIO_FASTIOV, iov, &kmsg->msg_iter);
+	return err < 0 ? err : 0;
 }
 
 /* Bleech... */
@@ -205,22 +218,25 @@ Efault:
 	return err;
 }
 
-int put_cmsg_compat(struct msghdr *kmsg, int level, int type, int len, void *data)
+int put_cmsg_compat(struct msghdr *kmsg, int level, int type, int len,
+		    void *data)
 {
-	struct compat_cmsghdr __user *cm = (struct compat_cmsghdr __user *) kmsg->msg_control;
+	struct compat_cmsghdr __user *cm_user;
+	struct compat_cmsghdr *cm;
 	struct compat_cmsghdr cmhdr;
 	struct compat_timeval ctv;
 	struct compat_timespec cts[3];
 	int cmlen;
 
-	if (cm == NULL || kmsg->msg_controllen < sizeof(*cm)) {
+	if (!kmsg->msg_control ||
+	    kmsg->msg_controllen < sizeof(struct compat_cmsghdr)) {
 		kmsg->msg_flags |= MSG_CTRUNC;
-		return 0; /* XXX: return error? check spec. */
+		return 0;
 	}
 
 	if (!COMPAT_USE_64BIT_TIME) {
 		if (level == SOL_SOCKET && type == SCM_TIMESTAMP) {
-			struct timeval *tv = (struct timeval *)data;
+			struct timeval *tv = data;
 			ctv.tv_sec = tv->tv_sec;
 			ctv.tv_usec = tv->tv_usec;
 			data = &ctv;
@@ -230,7 +246,8 @@ int put_cmsg_compat(struct msghdr *kmsg, int level, int type, int len, void *dat
 		    (type == SCM_TIMESTAMPNS || type == SCM_TIMESTAMPING)) {
 			int count = type == SCM_TIMESTAMPNS ? 1 : 3;
 			int i;
-			struct timespec *ts = (struct timespec *)data;
+			struct timespec *ts = data;
+
 			for (i = 0; i < count; i++) {
 				cts[i].tv_sec = ts[i].tv_sec;
 				cts[i].tv_nsec = ts[i].tv_nsec;
@@ -249,10 +266,20 @@ int put_cmsg_compat(struct msghdr *kmsg, int level, int type, int len, void *dat
 	cmhdr.cmsg_type = type;
 	cmhdr.cmsg_len = cmlen;
 
-	if (copy_to_user(cm, &cmhdr, sizeof cmhdr))
-		return -EFAULT;
-	if (copy_to_user(CMSG_COMPAT_DATA(cm), data, cmlen - sizeof(struct compat_cmsghdr)))
-		return -EFAULT;
+	if (kmsg->msg_control_is_user) {
+		cm_user = kmsg->msg_control_user;
+		if (copy_to_user(cm_user, &cmhdr, sizeof(cmhdr)) ||
+		    copy_to_user(CMSG_COMPAT_DATA(cm_user), data,
+				 cmlen - sizeof(struct compat_cmsghdr)))
+			return -EFAULT;
+	} else {
+		cm = kmsg->msg_control;
+		cm->cmsg_level = level;
+		cm->cmsg_type = type;
+		cm->cmsg_len = cmlen;
+		memcpy((char *)cm + sizeof(*cm), data,
+		       cmlen - sizeof(struct compat_cmsghdr));
+	}
 	cmlen = CMSG_COMPAT_SPACE(len);
 	if (kmsg->msg_controllen < cmlen)
 		cmlen = kmsg->msg_controllen;
@@ -270,6 +297,11 @@ void scm_detach_fds_compat(struct msghdr *kmsg, struct scm_cookie *scm)
 	int __user *cmfptr;
 	int err = 0, i;
 
+	if (WARN_ON_ONCE(!kmsg->msg_control_is_user)) {
+		kmsg->msg_flags |= MSG_CTRUNC;
+		__scm_destroy(scm);
+		return;
+	}
 	if (fdnum < fdmax)
 		fdmax = fdnum;
 

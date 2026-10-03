@@ -2284,6 +2284,13 @@ int get_signal(struct ksignal *ksig)
 	if (unlikely(current->task_works))
 		task_work_run();
 
+#ifdef TIF_NOTIFY_SIGNAL
+	if (test_thread_flag(TIF_NOTIFY_SIGNAL)) {
+		tracehook_notify_signal();
+		if (!test_thread_flag(TIF_SIGPENDING))
+			return 0;
+	}
+#endif
 	if (unlikely(uprobe_deny_signal()))
 		return 0;
 
@@ -2717,6 +2724,47 @@ int sigprocmask(int how, sigset_t *set, sigset_t *oldset)
 	__set_current_blocked(&newset);
 	return 0;
 }
+
+/*
+ * Set the temporary mask before waiting, paired with
+ * restore_saved_sigmask_unless() on every return path.
+ */
+int set_user_sigmask(const sigset_t __user *umask, size_t sigsetsize)
+{
+	sigset_t kmask;
+
+	if (!umask)
+		return 0;
+	if (sigsetsize != sizeof(sigset_t))
+		return -EINVAL;
+	if (copy_from_user(&kmask, umask, sizeof(kmask)))
+		return -EFAULT;
+
+	set_restore_sigmask();
+	current->saved_sigmask = current->blocked;
+	set_current_blocked(&kmask);
+	return 0;
+}
+
+#ifdef CONFIG_COMPAT
+int set_compat_user_sigmask(const compat_sigset_t __user *umask,
+			    size_t sigsetsize)
+{
+	sigset_t kmask;
+
+	if (!umask)
+		return 0;
+	if (sigsetsize != sizeof(compat_sigset_t))
+		return -EINVAL;
+	if (get_compat_sigset(&kmask, umask))
+		return -EFAULT;
+
+	set_restore_sigmask();
+	current->saved_sigmask = current->blocked;
+	set_current_blocked(&kmask);
+	return 0;
+}
+#endif
 
 /**
  *  sys_rt_sigprocmask - change the list of currently blocked signals

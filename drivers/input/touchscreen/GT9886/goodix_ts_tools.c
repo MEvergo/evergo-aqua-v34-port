@@ -26,6 +26,7 @@
 #include <linux/list.h>
 #include <linux/ioctl.h>
 #include <linux/wait.h>
+#include <linux/input/mt.h>
 #include "goodix_ts_core.h"
 
 #define GOODIX_TOOLS_NAME		"gtp_tools"
@@ -392,6 +393,8 @@ static long goodix_tools_ioctl(struct file *filp, unsigned int cmd,
 			goodix_ts_blocking_notify(NOTIFY_ESD_ON, NULL);
 		break;
 	case GTP_DEV_RESET:
+		if (dev->ts_core->input_dev)
+			input_mt_overlay_reset(dev->ts_core->input_dev);
 		hw_ops->reset(ts_dev);
 		break;
 	case GTP_SEND_COMMAND:

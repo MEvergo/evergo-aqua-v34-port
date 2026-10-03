@@ -887,15 +887,16 @@ struct page *follow_devmap_pmd(struct vm_area_struct *vma, unsigned long addr,
 	 * device mapped pages can only be returned if the
 	 * caller will manage the page reference count.
 	 */
-	if (!(flags & FOLL_GET))
+	if (!(flags & (FOLL_GET | FOLL_PIN)))
 		return ERR_PTR(-EEXIST);
 
 	pfn += (addr & ~PMD_MASK) >> PAGE_SHIFT;
-	*pgmap = get_dev_pagemap(pfn, *pgmap);
+	*pgmap = get_dev_pagemap_cached(pfn, pgmap);
 	if (!*pgmap)
 		return ERR_PTR(-EFAULT);
 	page = pfn_to_page(pfn);
-	get_page(page);
+	if (unlikely(!try_grab_page(page, flags)))
+		return ERR_PTR(-ENOMEM);
 
 	return page;
 }
@@ -1027,15 +1028,16 @@ struct page *follow_devmap_pud(struct vm_area_struct *vma, unsigned long addr,
 	 * device mapped pages can only be returned if the
 	 * caller will manage the page reference count.
 	 */
-	if (!(flags & FOLL_GET))
+	if (!(flags & (FOLL_GET | FOLL_PIN)))
 		return ERR_PTR(-EEXIST);
 
 	pfn += (addr & ~PUD_MASK) >> PAGE_SHIFT;
-	*pgmap = get_dev_pagemap(pfn, *pgmap);
+	*pgmap = get_dev_pagemap_cached(pfn, pgmap);
 	if (!*pgmap)
 		return ERR_PTR(-EFAULT);
 	page = pfn_to_page(pfn);
-	get_page(page);
+	if (unlikely(!try_grab_page(page, flags)))
+		return ERR_PTR(-ENOMEM);
 
 	return page;
 }
@@ -1432,8 +1434,12 @@ struct page *follow_trans_huge_pmd(struct vm_area_struct *vma,
 skip_mlock:
 	page += (addr & ~HPAGE_PMD_MASK) >> PAGE_SHIFT;
 	VM_BUG_ON_PAGE(!PageCompound(page) && !is_zone_device_page(page), page);
-	if (flags & FOLL_GET)
-		get_page(page);
+	if (flags & (FOLL_GET | FOLL_PIN)) {
+		if (unlikely(!try_grab_page(page, flags))) {
+			page = ERR_PTR(-ENOMEM);
+			goto out;
+		}
+	}
 
 out:
 	return page;
@@ -2327,7 +2333,7 @@ static void unmap_page(struct page *page)
 	if (PageAnon(page))
 		ttu_flags |= TTU_SPLIT_FREEZE;
 
-	try_to_unmap(page, ttu_flags);
+	try_to_unmap(page, ttu_flags, NULL);
 
 	VM_WARN_ON_ONCE_PAGE(page_mapped(page), page);
 }

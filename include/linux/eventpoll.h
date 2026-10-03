@@ -23,6 +23,14 @@ struct file;
 
 #ifdef CONFIG_EPOLL
 
+static inline int ep_op_has_event(int op)
+{
+	return op != EPOLL_CTL_DEL;
+}
+
+int do_epoll_ctl(int epfd, int op, int fd, struct epoll_event *event,
+		 bool nonblock);
+
 #ifdef CONFIG_CHECKPOINT_RESTORE
 struct file *get_epoll_tfile_raw_ptr(struct file *file, int tfd, unsigned long toff);
 #endif

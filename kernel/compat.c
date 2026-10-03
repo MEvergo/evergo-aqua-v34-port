@@ -201,6 +201,22 @@ int compat_put_timespec(const struct timespec *ts, void __user *uts)
 }
 EXPORT_SYMBOL_GPL(compat_put_timespec);
 
+int get_compat_sigset(sigset_t *set, const compat_sigset_t __user *compat)
+{
+#ifdef __BIG_ENDIAN
+	compat_sigset_t value;
+
+	if (copy_from_user(&value, compat, sizeof(value)))
+		return -EFAULT;
+	sigset_from_compat(set, &value);
+#else
+	if (copy_from_user(set, compat, sizeof(compat_sigset_t)))
+		return -EFAULT;
+#endif
+	return 0;
+}
+EXPORT_SYMBOL_GPL(get_compat_sigset);
+
 int get_compat_itimerval(struct itimerval *o, const struct compat_itimerval __user *i)
 {
 	struct compat_itimerval v32;

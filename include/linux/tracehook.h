@@ -193,4 +193,27 @@ static inline void tracehook_notify_resume(struct pt_regs *regs)
 	mem_cgroup_handle_over_high();
 }
 
+static inline void tracehook_notify_signal(void)
+{
+#ifdef TIF_NOTIFY_SIGNAL
+	clear_thread_flag(TIF_NOTIFY_SIGNAL);
+	smp_mb__after_atomic();
+	if (current->task_works)
+		task_work_run();
+#endif
+}
+
+static inline void set_notify_signal(struct task_struct *task)
+{
+#ifdef TIF_NOTIFY_SIGNAL
+	if (!test_and_set_tsk_thread_flag(task, TIF_NOTIFY_SIGNAL) &&
+	    !wake_up_state(task, TASK_INTERRUPTIBLE))
+		kick_process(task);
+#else
+	set_notify_resume(task);
+	wake_up_process(task);
+#endif
+}
+
+
 #endif	/* <linux/tracehook.h> */

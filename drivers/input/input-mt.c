@@ -11,7 +11,7 @@
 #include <linux/input/mt.h>
 #include <linux/export.h>
 #include <linux/slab.h>
-
+#include "input-mt-overlay.h"
 #define TRKID_SGN	((TRKID_MAX + 1) >> 1)
 
 static void copy_abs(struct input_dev *dev, unsigned int dst, unsigned int src)
@@ -42,7 +42,7 @@ int input_mt_init_slots(struct input_dev *dev, unsigned int num_slots,
 			unsigned int flags)
 {
 	struct input_mt *mt = dev->mt;
-	int i;
+	int i, error;
 
 	if (!num_slots)
 		return 0;
@@ -54,7 +54,7 @@ int input_mt_init_slots(struct input_dev *dev, unsigned int num_slots,
 
 	mt = kzalloc(sizeof(*mt) + num_slots * sizeof(*mt->slots), GFP_KERNEL);
 	if (!mt)
-		goto err_mem;
+		return -ENOMEM;
 
 	mt->num_slots = num_slots;
 	mt->flags = flags;
@@ -99,8 +99,14 @@ int input_mt_init_slots(struct input_dev *dev, unsigned int num_slots,
 	mt->frame = 1;
 
 	dev->mt = mt;
+	error = input_mt_overlay_init(dev);
+	if (error) {
+		dev->mt = NULL;
+		goto err_mem;
+	}
 	return 0;
 err_mem:
+	kfree(mt->red);
 	kfree(mt);
 	return -ENOMEM;
 }
@@ -115,6 +121,7 @@ EXPORT_SYMBOL(input_mt_init_slots);
  */
 void input_mt_destroy_slots(struct input_dev *dev)
 {
+	input_mt_overlay_free(dev);
 	if (dev->mt) {
 		kfree(dev->mt->red);
 		kfree(dev->mt);

@@ -328,9 +328,7 @@ static int put_pfn(unsigned long pfn, int prot)
 {
 	if (!is_invalid_reserved_pfn(pfn)) {
 		struct page *page = pfn_to_page(pfn);
-		if (prot & IOMMU_WRITE)
-			SetPageDirty(page);
-		put_page(page);
+		unpin_user_pages_dirty_lock(&page, 1, prot & IOMMU_WRITE);
 		return 1;
 	}
 	return 0;
@@ -374,32 +372,16 @@ static int vaddr_get_pfn(struct mm_struct *mm, unsigned long vaddr,
 	if (prot & IOMMU_WRITE)
 		flags |= FOLL_WRITE;
 
-	down_read(&mm->mmap_sem);
-	if (mm == current->mm) {
-		ret = get_user_pages_longterm(vaddr, 1, flags, page, vmas);
-	} else {
-		ret = get_user_pages_remote(NULL, mm, vaddr, 1, flags, page,
-					    vmas, NULL);
-		/*
-		 * The lifetime of a vaddr_get_pfn() page pin is
-		 * userspace-controlled. In the fs-dax case this could
-		 * lead to indefinite stalls in filesystem operations.
-		 * Disallow attempts to pin fs-dax pages via this
-		 * interface.
-		 */
-		if (ret > 0 && vma_is_fsdax(vmas[0])) {
-			ret = -EOPNOTSUPP;
-			put_page(page[0]);
-		}
-	}
-	up_read(&mm->mmap_sem);
-
-	if (ret == 1) {
+	mmap_read_lock(mm);
+	ret = pin_user_pages_remote(mm, vaddr, 1, flags | FOLL_LONGTERM,
+				    page, vmas, NULL);
+	if (ret > 0) {
 		*pfn = page_to_pfn(page[0]);
+		if (is_zero_pfn(*pfn))
+			unpin_user_page(page[0]);
+		mmap_read_unlock(mm);
 		return 0;
 	}
-
-	down_read(&mm->mmap_sem);
 
 	vaddr = untagged_addr(vaddr);
 
@@ -415,7 +397,7 @@ retry:
 			ret = -EFAULT;
 	}
 
-	up_read(&mm->mmap_sem);
+	mmap_read_unlock(mm);
 	return ret;
 }
 

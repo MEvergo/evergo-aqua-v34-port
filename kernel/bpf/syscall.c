@@ -2527,13 +2527,31 @@ struct bpf_tracing_link {
 	struct bpf_prog *tgt_prog;
 };
 
+/* The trampoline key fixes the target, so quarantine needs one target ref. */
+static void bpf_tracing_link_quarantine_target(struct bpf_trampoline *tr,
+					       struct bpf_prog *tgt_prog)
+{
+	if (!tgt_prog)
+		return;
+
+	mutex_lock(&tr->mutex);
+	if (tr->quarantined && tr->quarantined_tgt_prog != tgt_prog) {
+		bpf_prog_inc(tgt_prog);
+		tr->quarantined_tgt_prog = tgt_prog;
+	}
+	mutex_unlock(&tr->mutex);
+}
+
 static void bpf_tracing_link_release(struct bpf_link *link)
 {
 	struct bpf_tracing_link *tr_link =
 		container_of(link, struct bpf_tracing_link, link);
+	int err;
 
-	WARN_ON_ONCE(bpf_trampoline_unlink_prog(link->prog,
-						tr_link->trampoline));
+	err = bpf_trampoline_unlink_prog(link->prog, tr_link->trampoline);
+	if (WARN_ON_ONCE(err))
+		bpf_tracing_link_quarantine_target(tr_link->trampoline,
+						   tr_link->tgt_prog);
 
 	bpf_trampoline_put(tr_link->trampoline);
 
@@ -2734,6 +2752,8 @@ static int bpf_tracing_prog_attach(struct bpf_prog *prog,
 
 	return bpf_link_settle(&link_primer);
 out_unlock:
+	if (tr)
+		bpf_tracing_link_quarantine_target(tr, tgt_prog);
 	if (tr && tr != prog->aux->dst_trampoline)
 		bpf_trampoline_put(tr);
 	mutex_unlock(&prog->aux->dst_mutex);

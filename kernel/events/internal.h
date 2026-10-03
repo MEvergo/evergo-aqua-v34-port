@@ -5,6 +5,14 @@
 #include <linux/hardirq.h>
 #include <linux/uaccess.h>
 
+/* Set kernel-only behavior before fork/exec can observe the event. */
+struct perf_event *
+perf_event_create_kernel_counter_flags(struct perf_event_attr *attr, int cpu,
+				      struct task_struct *task,
+				      perf_overflow_handler_t overflow_handler,
+				      void *context, unsigned long flags,
+				      bool enable);
+
 /* Buffer handling */
 
 #define RING_BUFFER_WRITABLE		0x01

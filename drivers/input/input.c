@@ -28,6 +28,7 @@
 #include <linux/mutex.h>
 #include <linux/rcupdate.h>
 #include "input-compat.h"
+#include "input-mt-overlay.h"
 
 MODULE_AUTHOR("Vojtech Pavlik <vojtech@suse.cz>");
 MODULE_DESCRIPTION("Input core");
@@ -148,6 +149,8 @@ static void input_pass_values(struct input_dev *dev,
 	if (!count)
 		return;
 
+	input_mt_overlay_record_published_locked(dev, vals, count);
+
 	rcu_read_lock();
 
 	handle = rcu_dereference(dev->grab);
@@ -175,6 +178,12 @@ static void input_pass_values(struct input_dev *dev,
 			}
 		}
 	}
+}
+
+void input_mt_overlay_publish_locked(struct input_dev *dev,
+		struct input_value *vals, unsigned int count)
+{
+	input_pass_values(dev, vals, count);
 }
 
 static void input_pass_event(struct input_dev *dev,
@@ -378,9 +387,28 @@ static int input_get_disposition(struct input_dev *dev,
 }
 
 static void input_handle_event(struct input_dev *dev,
-			       unsigned int type, unsigned int code, int value)
+			       unsigned int type, unsigned int code, int value,
+			       bool physical)
 {
 	int disposition = input_get_disposition(dev, type, code, &value);
+
+	input_mt_overlay_record_event_locked(dev, type, code, value,
+			disposition & INPUT_PASS_TO_HANDLERS, physical);
+
+	if (dev->mt_overlay) {
+		if (type == EV_SYN && code == SYN_REPORT) {
+			bool flush = dev->num_vals != 0;
+
+			if (flush)
+				input_pass_values(dev, dev->vals, dev->num_vals);
+			dev->num_vals = 0;
+			input_mt_overlay_sync_locked(dev, physical, flush);
+			return;
+		}
+		/* Physical and legacy source frames cannot publish partial state. */
+		if (type == EV_ABS || (type == EV_KEY && value != 2))
+			disposition &= ~(INPUT_PASS_TO_HANDLERS | INPUT_SLOT);
+	}
 
 	if (disposition != INPUT_IGNORE_EVENT && type != EV_SYN)
 		add_input_randomness(type, code, value);
@@ -406,16 +434,22 @@ static void input_handle_event(struct input_dev *dev,
 		v->code = code;
 		v->value = value;
 	}
-
 	if (disposition & INPUT_FLUSH) {
-		if (dev->num_vals >= 2)
-			input_pass_values(dev, dev->vals, dev->num_vals);
+		unsigned int count = dev->num_vals;
+
+		if (count >= 2)
+			input_pass_values(dev, dev->vals, count);
 		dev->num_vals = 0;
 	} else if (dev->num_vals >= dev->max_vals - 2) {
+		unsigned int count;
+
 		dev->vals[dev->num_vals++] = input_value_sync;
-		input_pass_values(dev, dev->vals, dev->num_vals);
+		count = dev->num_vals;
+		if (count)
+			input_pass_values(dev, dev->vals, count);
 		dev->num_vals = 0;
 	}
+
 
 }
 
@@ -444,7 +478,7 @@ void input_event(struct input_dev *dev,
 	if (is_event_supported(type, dev->evbit, EV_MAX)) {
 
 		spin_lock_irqsave(&dev->event_lock, flags);
-		input_handle_event(dev, type, code, value);
+		input_handle_event(dev, type, code, value, true);
 		spin_unlock_irqrestore(&dev->event_lock, flags);
 	}
 }
@@ -474,7 +508,7 @@ void input_inject_event(struct input_handle *handle,
 		rcu_read_lock();
 		grab = rcu_dereference(dev->grab);
 		if (!grab || grab == handle)
-			input_handle_event(dev, type, code, value);
+			input_handle_event(dev, type, code, value, false);
 		rcu_read_unlock();
 
 		spin_unlock_irqrestore(&dev->event_lock, flags);
@@ -695,17 +729,23 @@ static void input_dev_release_keys(struct input_dev *dev)
 	bool need_sync = false;
 	int code;
 
-	if (is_event_supported(EV_KEY, dev->evbit, EV_MAX)) {
-		for_each_set_bit(code, dev->key, KEY_CNT) {
-			input_pass_event(dev, EV_KEY, code, 0);
-			need_sync = true;
-		}
+	if (!is_event_supported(EV_KEY, dev->evbit, EV_MAX))
+		return;
 
-		if (need_sync)
-			input_pass_event(dev, EV_SYN, SYN_REPORT, 1);
-
+	if (input_mt_overlay_release_keys_locked(dev)) {
 		memset(dev->key, 0, sizeof(dev->key));
+		return;
 	}
+
+	for_each_set_bit(code, dev->key, KEY_CNT) {
+		input_pass_event(dev, EV_KEY, code, 0);
+		need_sync = true;
+	}
+
+	if (need_sync)
+		input_pass_event(dev, EV_SYN, SYN_REPORT, 1);
+
+	memset(dev->key, 0, sizeof(dev->key));
 }
 
 /*
@@ -714,6 +754,10 @@ static void input_dev_release_keys(struct input_dev *dev)
 static void input_disconnect_device(struct input_dev *dev)
 {
 	struct input_handle *handle;
+
+	spin_lock_irq(&dev->event_lock);
+	input_mt_overlay_shutdown_locked(dev);
+	spin_unlock_irq(&dev->event_lock);
 
 	/*
 	 * Mark device as going away. Note that we take dev->mutex here
@@ -1761,6 +1805,7 @@ void input_reset_device(struct input_dev *dev)
 	spin_lock_irqsave(&dev->event_lock, flags);
 
 	input_dev_toggle(dev, true);
+	input_mt_overlay_reset_locked(dev);
 	input_dev_release_keys(dev);
 
 	spin_unlock_irqrestore(&dev->event_lock, flags);
@@ -1779,6 +1824,7 @@ static int input_dev_suspend(struct device *dev)
 	 * Keys that are pressed now are unlikely to be
 	 * still pressed when we resume.
 	 */
+	input_mt_overlay_suspend_locked(input_dev);
 	input_dev_release_keys(input_dev);
 
 	/* Turn off LEDs and sounds, if any are active. */
@@ -1795,6 +1841,7 @@ static int input_dev_resume(struct device *dev)
 
 	spin_lock_irq(&input_dev->event_lock);
 
+	input_mt_overlay_resume_locked(input_dev);
 	/* Restore state of LEDs and sounds, if any were active. */
 	input_dev_toggle(input_dev, true);
 
@@ -1813,6 +1860,7 @@ static int input_dev_freeze(struct device *dev)
 	 * Keys that are pressed now are unlikely to be
 	 * still pressed when we resume.
 	 */
+	input_mt_overlay_suspend_locked(input_dev);
 	input_dev_release_keys(input_dev);
 
 	spin_unlock_irq(&input_dev->event_lock);
@@ -1820,11 +1868,24 @@ static int input_dev_freeze(struct device *dev)
 	return 0;
 }
 
+static int input_dev_thaw(struct device *dev)
+{
+	struct input_dev *input_dev = to_input_dev(dev);
+
+	spin_lock_irq(&input_dev->event_lock);
+	input_mt_overlay_resume_locked(input_dev);
+	spin_unlock_irq(&input_dev->event_lock);
+
+	return 0;
+}
+
+
 static int input_dev_poweroff(struct device *dev)
 {
 	struct input_dev *input_dev = to_input_dev(dev);
 
 	spin_lock_irq(&input_dev->event_lock);
+	input_mt_overlay_suspend_locked(input_dev);
 
 	/* Turn off LEDs and sounds, if any are active. */
 	input_dev_toggle(input_dev, false);
@@ -1839,6 +1900,7 @@ static const struct dev_pm_ops input_dev_pm_ops = {
 	.resume		= input_dev_resume,
 	.freeze		= input_dev_freeze,
 	.poweroff	= input_dev_poweroff,
+	.thaw		= input_dev_thaw,
 	.restore	= input_dev_resume,
 };
 #endif /* CONFIG_PM */

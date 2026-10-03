@@ -21,6 +21,9 @@
 #include <linux/eventfd.h>
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
+#include <linux/percpu.h>
+
+DEFINE_PER_CPU(int, eventfd_wake_count);
 
 struct eventfd_ctx {
 	struct kref kref;
@@ -51,19 +54,50 @@ struct eventfd_ctx {
  * Returns the amount by which the counter was incremented.  This will be less
  * than @n if the counter has overflowed.
  */
-__u64 eventfd_signal(struct eventfd_ctx *ctx, __u64 n)
+__u64 eventfd_signal_mask(struct eventfd_ctx *ctx, __u64 n, unsigned int mask)
 {
 	unsigned long flags;
 
+	/*
+	 * Deadlock or stack overflow issues can happen if we recurse here
+	 * through waitqueue wakeup handlers. If the caller uses potentially
+	 * nested waitqueues with custom wakeup handlers, it should check
+	 * eventfd_signal_count() before calling this function and defer the
+	 * signal when it returns true.
+	 */
+	if (WARN_ON_ONCE(this_cpu_read(eventfd_wake_count)))
+		return 0;
+
 	spin_lock_irqsave(&ctx->wqh.lock, flags);
+	this_cpu_inc(eventfd_wake_count);
 	if (ULLONG_MAX - ctx->count < n)
 		n = ULLONG_MAX - ctx->count;
 	ctx->count += n;
 	if (waitqueue_active(&ctx->wqh))
-		wake_up_locked_poll(&ctx->wqh, POLLIN);
+		wake_up_locked_poll(&ctx->wqh, EPOLLIN | mask);
+	this_cpu_dec(eventfd_wake_count);
 	spin_unlock_irqrestore(&ctx->wqh.lock, flags);
 
 	return n;
+}
+
+/**
+ * eventfd_signal - Adds @n to the eventfd counter.
+ * @ctx: [in] Pointer to the eventfd context.
+ * @n: [in] Value of the counter to be added to the eventfd internal counter.
+ *          The value cannot be negative.
+ *
+ * This function is supposed to be called by the kernel in paths that do not
+ * allow sleeping. In this function we allow the counter to reach the ULLONG_MAX
+ * value, and we signal this as overflow condition by returning a POLLERR
+ * to poll(2).
+ *
+ * Returns the amount by which the counter was incremented.  This will be less
+ * than @n if the counter has overflowed.
+ */
+__u64 eventfd_signal(struct eventfd_ctx *ctx, __u64 n)
+{
+	return eventfd_signal_mask(ctx, n, 0);
 }
 EXPORT_SYMBOL_GPL(eventfd_signal);
 

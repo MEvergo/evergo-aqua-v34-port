@@ -32,6 +32,7 @@
 #include <linux/swap.h>
 #include <linux/string.h>
 #include <linux/init.h>
+#include <linux/io_uring.h>
 #include <linux/sched/mm.h>
 #include <linux/sched/coredump.h>
 #include <linux/sched/signal.h>
@@ -1757,6 +1758,7 @@ static int __do_execve_file(int fd, struct filename *filename,
 	if (!bprm)
 		goto out_files;
 
+	io_uring_task_cancel();
 	retval = prepare_bprm_creds(bprm);
 	if (retval)
 		goto out_free;

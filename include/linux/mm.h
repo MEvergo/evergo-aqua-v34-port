@@ -13,6 +13,7 @@
 #include <linux/mmzone.h>
 #include <linux/rbtree.h>
 #include <linux/atomic.h>
+#include <linux/page_ref.h>
 #include <linux/debug_locks.h>
 #include <linux/mm_types.h>
 #include <linux/range.h>
@@ -23,9 +24,38 @@
 #include <linux/resource.h>
 #include <linux/page_ext.h>
 #include <linux/err.h>
-#include <linux/page_ref.h>
-#include <linux/memremap.h>
 #include <linux/overflow.h>
+#include <linux/rwsem.h>
+
+static inline void mmap_read_lock(struct mm_struct *mm)
+{
+	down_read(&mm->mmap_sem);
+}
+
+static inline void mmap_read_unlock(struct mm_struct *mm)
+{
+	up_read(&mm->mmap_sem);
+}
+
+static inline int mmap_read_trylock(struct mm_struct *mm)
+{
+	return down_read_trylock(&mm->mmap_sem);
+}
+
+static inline void mmap_write_lock(struct mm_struct *mm)
+{
+	down_write(&mm->mmap_sem);
+}
+
+static inline void mmap_write_unlock(struct mm_struct *mm)
+{
+	up_write(&mm->mmap_sem);
+}
+
+static inline int mmap_write_trylock(struct mm_struct *mm)
+{
+	return down_write_trylock(&mm->mmap_sem);
+}
 
 struct mempolicy;
 struct anon_vma;
@@ -771,6 +801,40 @@ static inline unsigned int compound_order(struct page *page)
 	return page[1].compound_order;
 }
 
+#define GUP_PIN_COUNTING_BIAS (1U << 10)
+
+static inline bool hpage_pincount_available(struct page *page)
+{
+	page = compound_head(page);
+	return PageCompound(page) && compound_order(page) > 1;
+}
+
+static inline atomic_t *compound_pincount_ptr(struct page *page)
+{
+	return &page[2].hpage_pinned_refcount;
+}
+
+static inline int compound_pincount(struct page *page)
+{
+	VM_BUG_ON_PAGE(!hpage_pincount_available(page), page);
+	page = compound_head(page);
+	return atomic_read(compound_pincount_ptr(page));
+}
+
+static inline void hpage_pincount_add(struct page *page, int refs)
+{
+	VM_BUG_ON_PAGE(!hpage_pincount_available(page), page);
+	page = compound_head(page);
+	atomic_add(refs, compound_pincount_ptr(page));
+}
+
+static inline void hpage_pincount_sub(struct page *page, int refs)
+{
+	VM_BUG_ON_PAGE(!hpage_pincount_available(page), page);
+	page = compound_head(page);
+	atomic_sub(refs, compound_pincount_ptr(page));
+}
+
 static inline void set_compound_order(struct page *page, unsigned int order)
 {
 	page[1].compound_order = order;
@@ -968,6 +1032,15 @@ static inline __must_check bool try_get_page(struct page *page)
 		return false;
 	page_ref_inc(page);
 	return true;
+}
+
+bool __must_check try_grab_page(struct page *page, unsigned int flags);
+
+static inline bool page_maybe_dma_pinned(struct page *page)
+{
+	if (hpage_pincount_available(page))
+		return compound_pincount(page) > 0;
+	return page_ref_count(compound_head(page)) >= GUP_PIN_COUNTING_BIAS;
 }
 
 static inline void put_page(struct page *page)
@@ -1628,18 +1701,26 @@ long get_user_pages_locked(unsigned long start, unsigned long nr_pages,
 		    unsigned int gup_flags, struct page **pages, int *locked);
 long get_user_pages_unlocked(unsigned long start, unsigned long nr_pages,
 		    struct page **pages, unsigned int gup_flags);
-#ifdef CONFIG_FS_DAX
-long get_user_pages_longterm(unsigned long start, unsigned long nr_pages,
-			    unsigned int gup_flags, struct page **pages,
-			    struct vm_area_struct **vmas);
-#else
-static inline long get_user_pages_longterm(unsigned long start,
-		unsigned long nr_pages, unsigned int gup_flags,
-		struct page **pages, struct vm_area_struct **vmas)
-{
-	return get_user_pages(start, nr_pages, gup_flags, pages, vmas);
-}
-#endif /* CONFIG_FS_DAX */
+long pin_user_pages_remote(struct mm_struct *mm, unsigned long start,
+			   unsigned long nr_pages, unsigned int gup_flags,
+			   struct page **pages, struct vm_area_struct **vmas,
+			   int *locked);
+long pin_user_pages(unsigned long start, unsigned long nr_pages,
+		    unsigned int gup_flags, struct page **pages,
+		    struct vm_area_struct **vmas);
+long pin_user_pages_locked(unsigned long start, unsigned long nr_pages,
+			   unsigned int gup_flags, struct page **pages,
+			   int *locked);
+long pin_user_pages_unlocked(unsigned long start, unsigned long nr_pages,
+			     struct page **pages, unsigned int gup_flags);
+int pin_user_pages_fast(unsigned long start, int nr_pages,
+			unsigned int gup_flags, struct page **pages);
+int pin_user_pages_fast_only(unsigned long start, int nr_pages,
+			     unsigned int gup_flags, struct page **pages);
+void unpin_user_page(struct page *page);
+void unpin_user_pages(struct page **pages, unsigned long npages);
+void unpin_user_pages_dirty_lock(struct page **pages, unsigned long npages,
+				 bool make_dirty);
 
 int get_user_pages_fast(unsigned long start, int nr_pages, int write,
 			struct page **pages);
@@ -2468,6 +2549,8 @@ extern unsigned long do_mmap(struct file *file, unsigned long addr,
 	struct list_head *uf);
 extern int do_munmap(struct mm_struct *, unsigned long, size_t,
 		     struct list_head *uf);
+extern int do_madvise(struct mm_struct *mm, unsigned long start,
+		      size_t len_in, int behavior);
 
 static inline unsigned long
 do_mmap_pgoff(struct file *file, unsigned long addr,
@@ -2733,6 +2816,8 @@ struct page *follow_page(struct vm_area_struct *vma, unsigned long address,
 #define FOLL_REMOTE	0x2000	/* we are working on non-current tsk/mm */
 #define FOLL_COW	0x4000	/* internal GUP flag */
 #define FOLL_ANON	0x8000	/* don't do file mappings */
+#define FOLL_LONGTERM	0x10000	/* pin pages for an extended period of time */
+#define FOLL_PIN	0x40000	/* pin pages for DMA or similar operations */
 
 static inline int vm_fault_to_errno(int vm_fault, int foll_flags)
 {

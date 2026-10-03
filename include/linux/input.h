@@ -118,6 +118,7 @@ struct input_value {
  * @devres_managed: indicates that devices is managed with devres framework
  *	and needs not be explicitly unregistered or freed.
  */
+struct input_mt_overlay_state;
 struct input_dev {
 	const char *name;
 	const char *phys;
@@ -156,6 +157,7 @@ struct input_dev {
 	int rep[REP_CNT];
 
 	struct input_mt *mt;
+	struct input_mt_overlay_state *mt_overlay;
 
 	struct input_absinfo *absinfo;
 

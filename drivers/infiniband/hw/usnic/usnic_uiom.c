@@ -89,9 +89,7 @@ static void usnic_uiom_put_pages(struct list_head *chunk_list, int dirty)
 		for_each_sg(chunk->page_list, sg, chunk->nents, i) {
 			page = sg_page(sg);
 			pa = sg_phys(sg);
-			if (!PageDirty(page) && dirty)
-				set_page_dirty_lock(page);
-			put_page(page);
+			unpin_user_pages_dirty_lock(&page, 1, dirty);
 			usnic_dbg("pa: %pa\n", &pa);
 		}
 		kfree(chunk);
@@ -107,7 +105,7 @@ static int usnic_uiom_get_pages(unsigned long addr, size_t size, int writable,
 	unsigned long locked;
 	unsigned long lock_limit;
 	unsigned long cur_base;
-	unsigned long npages;
+	unsigned long npages, total_pages;
 	int ret;
 	int off;
 	int i;
@@ -134,11 +132,11 @@ static int usnic_uiom_get_pages(unsigned long addr, size_t size, int writable,
 	if (!page_list)
 		return -ENOMEM;
 
-	npages = PAGE_ALIGN(size + (addr & ~PAGE_MASK)) >> PAGE_SHIFT;
+	total_pages = npages = PAGE_ALIGN(size + (addr & ~PAGE_MASK)) >> PAGE_SHIFT;
 
 	down_write(&current->mm->mmap_sem);
 
-	locked = npages + current->mm->pinned_vm;
+	locked = npages + atomic64_read(&current->mm->pinned_vm);
 	lock_limit = rlimit(RLIMIT_MEMLOCK) >> PAGE_SHIFT;
 
 	if ((locked > lock_limit) && !capable(CAP_IPC_LOCK)) {
@@ -154,10 +152,10 @@ static int usnic_uiom_get_pages(unsigned long addr, size_t size, int writable,
 	ret = 0;
 
 	while (npages) {
-		ret = get_user_pages_longterm(cur_base,
-					min_t(unsigned long, npages,
-					PAGE_SIZE / sizeof(struct page *)),
-					gup_flags, page_list, NULL);
+		ret = pin_user_pages(cur_base,
+				     min_t(unsigned long, npages,
+					   PAGE_SIZE / sizeof(struct page *)),
+				     gup_flags | FOLL_LONGTERM, page_list, NULL);
 
 		if (ret < 0)
 			goto out;
@@ -171,6 +169,7 @@ static int usnic_uiom_get_pages(unsigned long addr, size_t size, int writable,
 					min_t(int, ret, USNIC_UIOM_PAGE_CHUNK),
 					GFP_KERNEL);
 			if (!chunk) {
+				unpin_user_pages(page_list + off, ret);
 				ret = -ENOMEM;
 				goto out;
 			}
@@ -197,7 +196,7 @@ out:
 	if (ret < 0)
 		usnic_uiom_put_pages(chunk_list, 0);
 	else
-		current->mm->pinned_vm = locked;
+		atomic64_add(total_pages, &current->mm->pinned_vm);
 
 	up_write(&current->mm->mmap_sem);
 	free_page((unsigned long) page_list);
@@ -470,7 +469,7 @@ void usnic_uiom_reg_release(struct usnic_uiom_reg *uiomr,
 	} else
 		down_write(&mm->mmap_sem);
 
-	mm->pinned_vm -= diff;
+	atomic64_sub(diff, &mm->pinned_vm);
 	up_write(&mm->mmap_sem);
 	mmput(mm);
 out:

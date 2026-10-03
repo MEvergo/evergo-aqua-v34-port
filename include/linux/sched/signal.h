@@ -313,9 +313,19 @@ static inline int restart_syscall(void)
 	return -ERESTARTNOINTR;
 }
 
+static inline int task_sigpending(struct task_struct *p)
+{
+	return unlikely(test_tsk_thread_flag(p, TIF_SIGPENDING));
+}
+
 static inline int signal_pending(struct task_struct *p)
 {
-	return unlikely(test_tsk_thread_flag(p,TIF_SIGPENDING));
+#ifdef TIF_NOTIFY_SIGNAL
+	return unlikely(task_sigpending(p) ||
+			test_tsk_thread_flag(p, TIF_NOTIFY_SIGNAL));
+#else
+	return task_sigpending(p);
+#endif
 }
 
 static inline int __fatal_signal_pending(struct task_struct *p)
@@ -381,18 +391,12 @@ static inline void ptrace_signal_wake_up(struct task_struct *t, bool resume)
 /**
  * set_restore_sigmask() - make sure saved_sigmask processing gets done
  *
- * This sets TIF_RESTORE_SIGMASK and ensures that the arch signal code
- * will run before returning to user mode, to process the flag.  For
- * all callers, TIF_SIGPENDING is already set or it's no harm to set
- * it.  TIF_RESTORE_SIGMASK need not be in the set of bits that the
- * arch code will notice on return to user mode, in case those bits
- * are scarce.  We set TIF_SIGPENDING here to ensure that the arch
- * signal code always gets run when TIF_RESTORE_SIGMASK is set.
+ * Mark the saved mask for restoration after an interrupted temporary-mask
+ * wait. Non-interrupted callers restore and clear it before returning.
  */
 static inline void set_restore_sigmask(void)
 {
 	set_thread_flag(TIF_RESTORE_SIGMASK);
-	WARN_ON(!test_thread_flag(TIF_SIGPENDING));
 }
 
 static inline void clear_tsk_restore_sigmask(struct task_struct *tsk)
@@ -423,7 +427,6 @@ static inline bool test_and_clear_restore_sigmask(void)
 static inline void set_restore_sigmask(void)
 {
 	current->restore_sigmask = true;
-	WARN_ON(!test_thread_flag(TIF_SIGPENDING));
 }
 static inline void clear_tsk_restore_sigmask(struct task_struct *tsk)
 {
@@ -454,6 +457,16 @@ static inline void restore_saved_sigmask(void)
 {
 	if (test_and_clear_restore_sigmask())
 		__set_current_blocked(&current->saved_sigmask);
+}
+
+extern int set_user_sigmask(const sigset_t __user *umask, size_t sigsetsize);
+
+static inline void restore_saved_sigmask_unless(bool interrupted)
+{
+	if (interrupted)
+		WARN_ON(!signal_pending(current));
+	else
+		restore_saved_sigmask();
 }
 
 static inline sigset_t *sigmask_to_save(void)

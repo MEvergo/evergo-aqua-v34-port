@@ -28,6 +28,16 @@
 
 unsigned long phys_from_virt(unsigned long addr, int *err);
 int ksu_patch_text(void *dst, void *src, size_t len, int flags);
+#ifdef CONFIG_KPM
+struct ksu_patch_text_op {
+	void *dst;
+	const void *src;
+	const void *expected;
+	size_t len;
+};
+
+int ksu_patch_text_batch(const struct ksu_patch_text_op *ops, size_t count);
+#endif
 void *scan_call_to(void *start, size_t size, void *target);
 
 #endif

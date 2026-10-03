@@ -105,10 +105,17 @@
 #endif
 
 #ifdef CONFIG_FTRACE_MCOUNT_RECORD
+#ifdef CONFIG_HAVE_PATCHABLE_FUNCTION_ENTRY
+#define MCOUNT_REC()	. = ALIGN(8);				\
+			VMLINUX_SYMBOL(__start_mcount_loc) = .; \
+			KEEP(*(__patchable_function_entries))	\
+			VMLINUX_SYMBOL(__stop_mcount_loc) = .;
+#else
 #define MCOUNT_REC()	. = ALIGN(8);				\
 			VMLINUX_SYMBOL(__start_mcount_loc) = .; \
 			KEEP(*(__mcount_loc))			\
 			VMLINUX_SYMBOL(__stop_mcount_loc) = .;
+#endif
 #else
 #define MCOUNT_REC()
 #endif

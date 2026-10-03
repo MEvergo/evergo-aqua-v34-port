@@ -19,10 +19,8 @@
  * This function maps virtual addresses from @start and fills @vec structure
  * with page frame numbers or page pointers to corresponding pages (choice
  * depends on the type of the vma underlying the virtual address). If @start
- * belongs to a normal vma, the function grabs reference to each of the pages
- * to pin them in memory. If @start belongs to VM_IO | VM_PFNMAP vma, we don't
- * touch page structures and the caller must make sure pfns aren't reused for
- * anything else while he is using them.
+ * belongs to a normal vma, the function long-term pins each page. If @start
+ * belongs to a VM_IO | VM_PFNMAP vma, the function returns an error.
  *
  * The function returns number of pages mapped which may be less than
  * @nr_frames. In particular we stop mapping if there are more vmas of
@@ -59,26 +57,28 @@ int get_vaddr_frames(unsigned long start, unsigned int nr_frames,
 	 * While get_vaddr_frames() could be used for transient (kernel
 	 * controlled lifetime) pinning of memory pages all current
 	 * users establish long term (userspace controlled lifetime)
-	 * page pinning. Treat get_vaddr_frames() like
-	 * get_user_pages_longterm() and disallow it for filesystem-dax
-	 * mappings.
+	 * page pinning. Treat get_vaddr_frames() as long-term pinning.
 	 */
-	if (vma_is_fsdax(vma)) {
-		ret = -EOPNOTSUPP;
+	if (vma->vm_flags & (VM_IO | VM_PFNMAP)) {
+		/* This used to (racily) return non-refcounted pfns. Let people know */
+		WARN_ONCE(1, "get_vaddr_frames() cannot follow VM_IO mapping");
+		vec->nr_frames = 0;
 		goto out;
 	}
 
-	if (!(vma->vm_flags & (VM_IO | VM_PFNMAP))) {
-		vec->got_ref = true;
-		vec->is_pfns = false;
-		ret = get_user_pages_locked(start, nr_frames,
-			gup_flags, (struct page **)(vec->ptrs), &locked);
-		if (likely(ret > 0))
-			goto out;
-	}
-
-	/* This used to (racily) return non-refcounted pfns. Let people know */
-	WARN_ONCE(1, "get_vaddr_frames() cannot follow VM_IO mapping");
+	/*
+	 * Long-term pins must not be acquired with mmap_sem held. The GUP
+	 * long-term path checks DAX mappings and CMA pages across the range.
+	 */
+	up_read(&mm->mmap_sem);
+	locked = 0;
+	vec->got_ref = true;
+	vec->is_pfns = false;
+	ret = pin_user_pages_unlocked(start, nr_frames,
+				      (struct page **)(vec->ptrs),
+				      gup_flags | FOLL_LONGTERM);
+	if (likely(ret > 0))
+		goto out;
 	vec->nr_frames = 0;
 
 out:
@@ -93,17 +93,14 @@ out:
 EXPORT_SYMBOL(get_vaddr_frames);
 
 /**
- * put_vaddr_frames() - drop references to pages if get_vaddr_frames() acquired
- *			them
- * @vec:	frame vector to put
+ * put_vaddr_frames() - unpin pages pinned by get_vaddr_frames()
+ * @vec:	frame vector whose pins to release
  *
- * Drop references to pages if get_vaddr_frames() acquired them. We also
- * invalidate the frame vector so that it is prepared for the next call into
- * get_vaddr_frames().
+ * Unpin pages if get_vaddr_frames() pinned them. We also invalidate the frame
+ * vector so that it is prepared for the next call into get_vaddr_frames().
  */
 void put_vaddr_frames(struct frame_vector *vec)
 {
-	int i;
 	struct page **pages;
 
 	if (!vec->got_ref)
@@ -116,8 +113,7 @@ void put_vaddr_frames(struct frame_vector *vec)
 	 */
 	if (WARN_ON(IS_ERR(pages)))
 		goto out;
-	for (i = 0; i < vec->nr_frames; i++)
-		put_page(pages[i]);
+	unpin_user_pages(pages, vec->nr_frames);
 	vec->got_ref = false;
 out:
 	vec->nr_frames = 0;
@@ -203,6 +199,8 @@ struct frame_vector *frame_vector_create(unsigned int nr_frames)
 		return NULL;
 	vec->nr_allocated = nr_frames;
 	vec->nr_frames = 0;
+	vec->got_ref = false;
+	vec->is_pfns = false;
 	return vec;
 }
 EXPORT_SYMBOL(frame_vector_create);

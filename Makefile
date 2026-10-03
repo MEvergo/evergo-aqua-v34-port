@@ -549,6 +549,8 @@ ifeq ($(call shell-cached,$(CONFIG_SHELL) $(srctree)/scripts/cc-can-link.sh $(CC
   export CC_CAN_LINK
 endif
 
+export CC_HAS_PATCHABLE_FUNCTION_ENTRY := $(if $(call cc-option,-fpatchable-function-entry=2),y,n)
+
 ifeq ($(config-targets),1)
 # ===========================================================================
 # *config targets only - make sure prerequisites are updated, and descend
@@ -860,12 +862,14 @@ ifdef CONFIG_FUNCTION_TRACER
 ifndef CC_FLAGS_FTRACE
 CC_FLAGS_FTRACE := -pg
 endif
+ifndef CONFIG_HAVE_PATCHABLE_FUNCTION_ENTRY
 ifdef CONFIG_FTRACE_MCOUNT_RECORD
   # gcc 5 supports generating the mcount tables directly
   ifeq ($(call cc-option-yn,-mrecord-mcount),y)
     CC_FLAGS_FTRACE	+= -mrecord-mcount
     export CC_USING_RECORD_MCOUNT := 1
   endif
+endif
 endif
 export CC_FLAGS_FTRACE
 ifdef CONFIG_HAVE_FENTRY
@@ -874,10 +878,12 @@ endif
 KBUILD_CFLAGS	+= $(CC_FLAGS_FTRACE) $(CC_USING_FENTRY)
 KBUILD_AFLAGS	+= $(CC_USING_FENTRY)
 ifdef CONFIG_DYNAMIC_FTRACE
+ifndef CONFIG_HAVE_PATCHABLE_FUNCTION_ENTRY
 	ifdef CONFIG_HAVE_C_RECORDMCOUNT
 		BUILD_C_RECORDMCOUNT := y
 		export BUILD_C_RECORDMCOUNT
 	endif
+endif
 endif
 endif
 
@@ -1153,6 +1159,7 @@ PHONY += prepare0
 
 ifeq ($(KBUILD_EXTMOD),)
 core-y		+= kernel/ certs/ mm/ fs/ ipc/ security/ crypto/ block/
+core-y		+= io_uring/
 
 vmlinux-dirs	:= $(patsubst %/,%,$(filter %/, $(init-y) $(init-m) \
 		     $(core-y) $(core-m) $(drivers-y) $(drivers-m) \
@@ -1209,6 +1216,14 @@ cmd_link-vmlinux =                                                 \
 
 vmlinux: scripts/link-vmlinux.sh vmlinux_prereq $(vmlinux-deps) FORCE
 	+$(call if_changed,link-vmlinux)
+ifdef CONFIG_DEBUG_INFO_BTF
+PHONY += resolve_btfids
+resolve_btfids: FORCE
+	$(Q)mkdir -p $(abspath $(objtree)/tools/bpf/resolve_btfids/)
+	$(Q)$(MAKE) LDFLAGS= -C $(srctree)/tools/bpf/resolve_btfids \
+		OUTPUT=$(abspath $(objtree)/tools/bpf/resolve_btfids)/
+vmlinux: resolve_btfids
+endif
 
 # Build samples along the rest of the kernel
 ifdef CONFIG_SAMPLES

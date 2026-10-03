@@ -601,8 +601,13 @@ static ssize_t goodix_ts_reset_store(struct device *dev,
 	if (en != 1)
 		return -EINVAL;
 
-	if (ts_dev->hw_ops->reset)
+	if (ts_dev->hw_ops->reset) {
+#ifdef INPUT_TYPE_B_PROTOCOL
+		if (core_data->input_dev)
+			input_mt_overlay_reset(core_data->input_dev);
+#endif
 		ts_dev->hw_ops->reset(ts_dev);
+	}
 	return count;
 
 }
@@ -1503,6 +1508,10 @@ int goodix_ts_input_dev_config(struct goodix_ts_core *core_data)
 		return r;
 	}
 #endif
+	r = input_mt_overlay_reserve_slot(input_dev,
+					  ts_bdata->panel_max_id * 2);
+	if (r < 0)
+		return r;
 #endif
 
 	input_set_capability(input_dev, EV_KEY, KEY_POWER);
@@ -1530,6 +1539,10 @@ int goodix_ts_hw_init(struct goodix_ts_core *core_data)
 
 	/* reset touch device */
 	if (hw_ops->reset) {
+#ifdef INPUT_TYPE_B_PROTOCOL
+		if (core_data->input_dev)
+			input_mt_overlay_reset(core_data->input_dev);
+#endif
 		r = hw_ops->reset(core_data->ts_dev);
 		if (r < 0)
 			goto exit;
@@ -1574,6 +1587,10 @@ static void goodix_ts_esd_work(struct work_struct *work)
 	if (hw_ops->check_hw)
 		r = hw_ops->check_hw(core->ts_dev);
 	if (r < 0) {
+#ifdef INPUT_TYPE_B_PROTOCOL
+		if (core->input_dev)
+			input_mt_overlay_reset(core->input_dev);
+#endif
 		goodix_ts_power_off(core);
 		goodix_ts_power_on(core);
 		if (hw_ops->reset)
@@ -1735,6 +1752,7 @@ static int goodix_ts_power_on_reinit(void)
 #endif
 
 	goodix_ts_irq_enable(core_data, false);
+	input_mt_overlay_reset(core_data->input_dev);
 	goodix_ts_power_off(core_data);
 	/* release all the touch IDs */
 	core_data->ts_event.event_data.touch_data.touch_num = 0;
@@ -1765,6 +1783,7 @@ static int goodix_ts_suspend(struct goodix_ts_core *core_data)
 	int r;
 
 	ts_info("Suspend start");
+	input_mt_overlay_suspend(core_data->input_dev);
 
 	/*
 	 * notify suspend event, inform the esd protector
@@ -1905,6 +1924,8 @@ static int goodix_ts_resume(struct goodix_ts_core *core_data)
 
 	goodix_ts_irq_enable(core_data, true);
 out:
+	if (r >= 0 && !atomic_read(&core_data->suspended))
+		input_mt_overlay_resume(core_data->input_dev);
 	/*
 	 * notify resume event, inform the esd protector
 	 * and charger detector to turn on the work

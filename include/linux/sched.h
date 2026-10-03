@@ -37,6 +37,7 @@ struct cfs_rq;
 struct fs_struct;
 struct futex_pi_state;
 struct io_context;
+struct io_uring_task;
 struct mempolicy;
 struct nameidata;
 struct nsproxy;
@@ -741,9 +742,7 @@ union rcu_special {
 		u8			blocked;
 		u8			need_qs;
 		u8			exp_need_qs;
-
-		/* Otherwise the compiler can store garbage here: */
-		u8			pad;
+		u8			need_mb;
 	} b; /* Bits. */
 	u32 s; /* Set of bits. */
 };
@@ -861,7 +860,7 @@ struct task_struct {
 #ifdef CONFIG_TASKS_TRACE_RCU
 	int				trc_reader_nesting;
 	int				trc_ipi_to_cpu;
-	bool				trc_reader_need_end;
+	union rcu_special		trc_reader_special;
 	bool				trc_reader_checked;
 	struct list_head		trc_holdout_list;
 #endif /* #ifdef CONFIG_TASKS_TRACE_RCU */
@@ -986,6 +985,7 @@ struct task_struct {
 
 	/* CLONE_CHILD_CLEARTID: */
 	int __user			*clear_child_tid;
+	void				*pf_io_worker;
 
 	u64				utime;
 	u64				stime;
@@ -1068,6 +1068,9 @@ struct task_struct {
 
 	/* Open file information: */
 	struct files_struct		*files;
+#ifdef CONFIG_IO_URING
+	struct io_uring_task		*io_uring;
+#endif
 
 	/* Namespaces: */
 	struct nsproxy			*nsproxy;
@@ -1591,6 +1594,7 @@ extern struct pid *cad_pid;
  */
 #define PF_IDLE			0x00000002	/* I am an IDLE thread */
 #define PF_EXITING		0x00000004	/* Getting shut down */
+#define PF_IO_WORKER		0x00000008	/* I'm an io_uring worker */
 #define PF_VCPU			0x00000010	/* I'm a virtual CPU */
 #define PF_WQ_WORKER		0x00000020	/* I'm a workqueue worker */
 #define PF_FORKNOEXEC		0x00000040	/* Forked but didn't exec */
@@ -1601,6 +1605,7 @@ extern struct pid *cad_pid;
 #define PF_MEMALLOC		0x00000800	/* Allocating memory */
 #define PF_NPROC_EXCEEDED	0x00001000	/* set_user() noticed that RLIMIT_NPROC was exceeded */
 #define PF_USED_MATH		0x00002000	/* If unset the fpu must be initialized before use */
+#define PF_MEMALLOC_NOCMA	0x00004000	/* Do not allocate from CMA areas */
 #define PF_NOFREEZE		0x00008000	/* This thread should not be frozen */
 #define PF_FROZEN		0x00010000	/* Frozen for system suspend */
 #define PF_KSWAPD		0x00020000	/* I am kswapd */
@@ -1747,6 +1752,10 @@ static inline int task_nice(const struct task_struct *p)
 
 extern int can_nice(const struct task_struct *p, const int nice);
 extern int task_curr(const struct task_struct *p);
+extern bool try_invoke_on_locked_down_task(struct task_struct *p,
+					   bool (*func)(struct task_struct *t,
+							void *arg),
+					   void *arg);
 extern int idle_cpu(int cpu);
 extern int sched_setscheduler(struct task_struct *, int, const struct sched_param *);
 extern int sched_setscheduler_nocheck(struct task_struct *, int, const struct sched_param *);

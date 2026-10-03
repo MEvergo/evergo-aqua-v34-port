@@ -37,7 +37,10 @@ void *bpf_jit_alloc_exec_page(void)
 	/* Keep image as writeable. The alternative is to keep flipping ro/rw
 	 * everytime new program is attached or detached.
 	 */
-	set_memory_x((long)image, 1);
+	if (set_memory_x((long)image, 1)) {
+		bpf_jit_free_exec(image);
+		return NULL;
+	}
 	return image;
 }
 
@@ -109,12 +112,13 @@ out:
 
 static int is_ftrace_location(void *ip)
 {
+	unsigned long callsite = ftrace_call_adjust((unsigned long)ip);
 	long addr;
 
-	addr = ftrace_location((long)ip);
+	addr = ftrace_location(callsite);
 	if (!addr)
 		return 0;
-	if (WARN_ON_ONCE(addr != (long)ip))
+	if (WARN_ON_ONCE(addr != callsite))
 		return -EFAULT;
 	return 1;
 }
@@ -125,7 +129,8 @@ static int unregister_fentry(struct bpf_trampoline *tr, void *old_addr)
 	int ret;
 
 	if (tr->func.ftrace_managed)
-		ret = unregister_ftrace_direct((long)ip, (long)old_addr);
+		ret = unregister_ftrace_direct(ftrace_call_adjust((unsigned long)ip),
+					       (long)old_addr);
 	else
 		ret = bpf_arch_text_poke(ip, BPF_MOD_CALL, old_addr, NULL);
 	return ret;
@@ -137,7 +142,8 @@ static int modify_fentry(struct bpf_trampoline *tr, void *old_addr, void *new_ad
 	int ret;
 
 	if (tr->func.ftrace_managed)
-		ret = modify_ftrace_direct((long)ip, (long)old_addr, (long)new_addr);
+		ret = modify_ftrace_direct(ftrace_call_adjust((unsigned long)ip),
+					   (long)old_addr, (long)new_addr);
 	else
 		ret = bpf_arch_text_poke(ip, BPF_MOD_CALL, old_addr, new_addr);
 	return ret;
@@ -155,7 +161,8 @@ static int register_fentry(struct bpf_trampoline *tr, void *new_addr)
 	tr->func.ftrace_managed = ret;
 
 	if (tr->func.ftrace_managed)
-		ret = register_ftrace_direct((long)ip, (long)new_addr);
+		ret = register_ftrace_direct(ftrace_call_adjust((unsigned long)ip),
+					     (long)new_addr);
 	else
 		ret = bpf_arch_text_poke(ip, BPF_MOD_CALL, NULL, new_addr);
 	return ret;
@@ -185,7 +192,48 @@ bpf_trampoline_get_progs(const struct bpf_trampoline *tr, int *total)
 	return tprogs;
 }
 
-static int bpf_trampoline_update(struct bpf_trampoline *tr)
+/* A failed patch may leave either image active. Pin both the trampoline and
+ * every program that could be reached; quarantine blocks later updates.
+ */
+static void bpf_trampoline_quarantine(struct bpf_trampoline *tr,
+				      struct bpf_prog *prog)
+{
+	struct bpf_prog_aux *aux;
+	bool prog_held = false;
+	int kind;
+
+	if (!tr->quarantined) {
+		tr->quarantined = true;
+		/* Keep the trampoline alive after its links drop their refs. */
+		refcount_inc(&tr->refcnt);
+		for (kind = 0; kind < BPF_TRAMP_MAX; kind++) {
+			hlist_for_each_entry(aux, &tr->progs_hlist[kind],
+					     tramp_hlist) {
+				bpf_prog_inc(aux->prog);
+				if (aux->prog == prog)
+					prog_held = true;
+			}
+		}
+		if (tr->extension_prog) {
+			bpf_prog_inc(tr->extension_prog);
+			if (tr->extension_prog == prog)
+				prog_held = true;
+		}
+	} else {
+		for (kind = 0; kind < BPF_TRAMP_MAX; kind++)
+			hlist_for_each_entry(aux, &tr->progs_hlist[kind],
+					     tramp_hlist)
+				if (aux->prog == prog)
+					prog_held = true;
+		if (tr->extension_prog == prog)
+			prog_held = true;
+	}
+	if (!prog_held)
+		bpf_prog_inc(prog);
+}
+
+static int bpf_trampoline_update(struct bpf_trampoline *tr,
+				 bool *patch_failed)
 {
 	void *old_image = tr->image + ((tr->selector + 1) & 1) * PAGE_SIZE/2;
 	void *new_image = tr->image + (tr->selector & 1) * PAGE_SIZE/2;
@@ -193,13 +241,17 @@ static int bpf_trampoline_update(struct bpf_trampoline *tr)
 	u32 flags = BPF_TRAMP_F_RESTORE_REGS;
 	int err, total;
 
+	*patch_failed = false;
 	tprogs = bpf_trampoline_get_progs(tr, &total);
 	if (IS_ERR(tprogs))
 		return PTR_ERR(tprogs);
 
 	if (total == 0) {
 		err = unregister_fentry(tr, old_image);
-		tr->selector = 0;
+		if (err)
+			*patch_failed = true;
+		else
+			tr->selector = 0;
 		goto out;
 	}
 
@@ -231,8 +283,10 @@ static int bpf_trampoline_update(struct bpf_trampoline *tr)
 	else
 		/* first time registering */
 		err = register_fentry(tr, new_image);
-	if (err)
+	if (err) {
+		*patch_failed = true;
 		goto out;
+	}
 	tr->selector++;
 out:
 	kfree(tprogs);
@@ -264,11 +318,16 @@ static enum bpf_tramp_prog_type bpf_attach_type_to_tramp(struct bpf_prog *prog)
 int bpf_trampoline_link_prog(struct bpf_prog *prog, struct bpf_trampoline *tr)
 {
 	enum bpf_tramp_prog_type kind;
+	bool patch_failed;
 	int err = 0;
 	int cnt = 0, i;
 
 	kind = bpf_attach_type_to_tramp(prog);
 	mutex_lock(&tr->mutex);
+	if (tr->quarantined) {
+		err = -EIO;
+		goto out;
+	}
 	if (tr->extension_prog) {
 		/* cannot attach fentry/fexit if extension prog is attached.
 		 * cannot overwrite extension prog either.
@@ -286,9 +345,12 @@ int bpf_trampoline_link_prog(struct bpf_prog *prog, struct bpf_trampoline *tr)
 			err = -EBUSY;
 			goto out;
 		}
-		tr->extension_prog = prog;
 		err = bpf_arch_text_poke(tr->func.addr, BPF_MOD_JUMP, NULL,
 					 prog->bpf_func);
+		if (err)
+			bpf_trampoline_quarantine(tr, prog);
+		else
+			tr->extension_prog = prog;
 		goto out;
 	}
 	if (cnt >= BPF_MAX_TRAMP_PROGS) {
@@ -302,8 +364,10 @@ int bpf_trampoline_link_prog(struct bpf_prog *prog, struct bpf_trampoline *tr)
 	}
 	hlist_add_head(&prog->aux->tramp_hlist, &tr->progs_hlist[kind]);
 	tr->progs_cnt[kind]++;
-	err = bpf_trampoline_update(tr);
+	err = bpf_trampoline_update(tr, &patch_failed);
 	if (err) {
+		if (patch_failed)
+			bpf_trampoline_quarantine(tr, prog);
 		hlist_del(&prog->aux->tramp_hlist);
 		tr->progs_cnt[kind]--;
 	}
@@ -312,24 +376,59 @@ out:
 	return err;
 }
 
-/* bpf_trampoline_unlink_prog() should never fail. */
+/* A failed unlink quarantines the active trampoline and its programs. */
 int bpf_trampoline_unlink_prog(struct bpf_prog *prog, struct bpf_trampoline *tr)
 {
+	struct hlist_node *node, *next, *prev;
 	enum bpf_tramp_prog_type kind;
+	bool patch_failed;
 	int err;
 
 	kind = bpf_attach_type_to_tramp(prog);
 	mutex_lock(&tr->mutex);
-	if (kind == BPF_TRAMP_REPLACE) {
-		WARN_ON_ONCE(!tr->extension_prog);
-		err = bpf_arch_text_poke(tr->func.addr, BPF_MOD_JUMP,
-					 tr->extension_prog->bpf_func, NULL);
-		tr->extension_prog = NULL;
+	if (tr->quarantined) {
+		err = -EIO;
+		bpf_trampoline_quarantine(tr, prog);
 		goto out;
 	}
-	hlist_del(&prog->aux->tramp_hlist);
+	if (kind == BPF_TRAMP_REPLACE) {
+		if (!tr->extension_prog) {
+			err = -ENOENT;
+			bpf_trampoline_quarantine(tr, prog);
+			goto out;
+		}
+		err = bpf_arch_text_poke(tr->func.addr, BPF_MOD_JUMP,
+					 tr->extension_prog->bpf_func, NULL);
+		if (err)
+			bpf_trampoline_quarantine(tr, prog);
+		else
+			tr->extension_prog = NULL;
+		goto out;
+	}
+	node = &prog->aux->tramp_hlist;
+	if (hlist_unhashed(node)) {
+		err = -ENOENT;
+		bpf_trampoline_quarantine(tr, prog);
+		goto out;
+	}
+	next = node->next;
+	if (node->pprev == &tr->progs_hlist[kind].first)
+		prev = NULL;
+	else
+		prev = container_of(node->pprev, struct hlist_node, next);
+	hlist_del_init(node);
 	tr->progs_cnt[kind]--;
-	err = bpf_trampoline_update(tr);
+	err = bpf_trampoline_update(tr, &patch_failed);
+	if (err) {
+		if (next)
+			hlist_add_before(node, next);
+		else if (prev)
+			hlist_add_behind(node, prev);
+		else
+			hlist_add_head(node, &tr->progs_hlist[kind]);
+		tr->progs_cnt[kind]++;
+		bpf_trampoline_quarantine(tr, prog);
+	}
 out:
 	mutex_unlock(&tr->mutex);
 	return err;

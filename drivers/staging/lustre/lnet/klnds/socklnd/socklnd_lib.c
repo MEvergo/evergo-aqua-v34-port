@@ -90,7 +90,7 @@ ksocknal_lib_send_iov(struct ksock_conn *conn, struct ksock_tx *tx)
 	    nob < tx->tx_resid)
 		msg.msg_flags |= MSG_MORE;
 
-	iov_iter_kvec(&msg.msg_iter, WRITE | ITER_KVEC,
+	iov_iter_kvec(&msg.msg_iter, WRITE,
 		      tx->tx_iov, tx->tx_niov, nob);
 	return sock_sendmsg(sock, &msg);
 }
@@ -138,7 +138,7 @@ ksocknal_lib_send_kiov(struct ksock_conn *conn, struct ksock_tx *tx)
 		    nob < tx->tx_resid)
 			msg.msg_flags |= MSG_MORE;
 
-		iov_iter_bvec(&msg.msg_iter, WRITE | ITER_BVEC,
+		iov_iter_bvec(&msg.msg_iter, WRITE,
 			      kiov, tx->tx_nkiov, nob);
 		rc = sock_sendmsg(sock, &msg);
 	}
@@ -183,7 +183,7 @@ ksocknal_lib_recv_iov(struct ksock_conn *conn)
 
 	LASSERT(nob <= conn->ksnc_rx_nob_wanted);
 
-	iov_iter_kvec(&msg.msg_iter, READ | ITER_KVEC, iov, niov, nob);
+	iov_iter_kvec(&msg.msg_iter, READ, iov, niov, nob);
 	rc = sock_recvmsg(conn->ksnc_sock, &msg, MSG_DONTWAIT);
 
 	saved_csum = 0;
@@ -231,7 +231,7 @@ ksocknal_lib_recv_kiov(struct ksock_conn *conn)
 
 	LASSERT(nob <= conn->ksnc_rx_nob_wanted);
 
-	iov_iter_bvec(&msg.msg_iter, READ | ITER_BVEC, kiov, niov, nob);
+	iov_iter_bvec(&msg.msg_iter, READ, kiov, niov, nob);
 	rc = sock_recvmsg(conn->ksnc_sock, &msg, MSG_DONTWAIT);
 
 	if (conn->ksnc_msg.ksm_csum) {

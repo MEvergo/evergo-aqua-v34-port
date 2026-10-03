@@ -5300,7 +5300,7 @@ static void perf_mmap_close(struct vm_area_struct *vma)
 
 		/* now it's safe to free the pages */
 		atomic_long_sub(rb->aux_nr_pages, &mmap_user->locked_vm);
-		vma->vm_mm->pinned_vm -= rb->aux_mmap_locked;
+		atomic64_sub(rb->aux_mmap_locked, &vma->vm_mm->pinned_vm);
 
 		/* this has to be the last one */
 		rb_free_aux(rb);
@@ -5374,7 +5374,7 @@ again:
 	 */
 
 	atomic_long_sub((size >> PAGE_SHIFT) + 1, &mmap_user->locked_vm);
-	vma->vm_mm->pinned_vm -= mmap_locked;
+	atomic64_sub(mmap_locked, &vma->vm_mm->pinned_vm);
 	free_uid(mmap_user);
 
 out_put:
@@ -5536,7 +5536,7 @@ accounting:
 
 	lock_limit = rlimit(RLIMIT_MEMLOCK);
 	lock_limit >>= PAGE_SHIFT;
-	locked = vma->vm_mm->pinned_vm + extra;
+	locked = atomic64_read(&vma->vm_mm->pinned_vm) + extra;
 
 	if ((locked > lock_limit) && perf_is_paranoid() &&
 		!capable(CAP_IPC_LOCK)) {
@@ -5577,7 +5577,7 @@ accounting:
 unlock:
 	if (!ret) {
 		atomic_long_add(user_extra, &user->locked_vm);
-		vma->vm_mm->pinned_vm += extra;
+		atomic64_add(extra, &vma->vm_mm->pinned_vm);
 
 		atomic_inc(&event->mmap_count);
 	} else if (rb) {
@@ -10085,6 +10085,9 @@ perf_event_alloc(struct perf_event_attr *attr, int cpu,
 	if (!overflow_handler && parent_event) {
 		overflow_handler = parent_event->overflow_handler;
 		context = parent_event->overflow_handler_context;
+#ifdef CONFIG_HAVE_HW_BREAKPOINT
+		event->hw_breakpoint_flags = parent_event->hw_breakpoint_flags;
+#endif
 #if defined(CONFIG_BPF_SYSCALL) && defined(CONFIG_EVENT_TRACING)
 		if (overflow_handler == bpf_overflow_handler) {
 			struct bpf_prog *prog = parent_event->prog;
@@ -10973,18 +10976,12 @@ err_fd:
 	return err;
 }
 
-/**
- * perf_event_create_kernel_counter
- *
- * @attr: attributes of the counter to create
- * @cpu: cpu in which the counter is bound
- * @task: task to profile (NULL for percpu)
- */
 struct perf_event *
-perf_event_create_kernel_counter(struct perf_event_attr *attr, int cpu,
-				 struct task_struct *task,
-				 perf_overflow_handler_t overflow_handler,
-				 void *context)
+perf_event_create_kernel_counter_flags(struct perf_event_attr *attr, int cpu,
+				      struct task_struct *task,
+				      perf_overflow_handler_t overflow_handler,
+				      void *context, unsigned long flags,
+				      bool enable)
 {
 	struct perf_event_context *ctx;
 	struct perf_event *event;
@@ -10999,6 +10996,14 @@ perf_event_create_kernel_counter(struct perf_event_attr *attr, int cpu,
 	if (IS_ERR(event)) {
 		err = PTR_ERR(event);
 		goto err;
+	}
+
+#ifdef CONFIG_HAVE_HW_BREAKPOINT
+	event->hw_breakpoint_flags = flags;
+#endif
+	if (enable) {
+		event->attr.disabled = 0;
+		perf_event__state_init(event);
 	}
 
 	/* Mark owner so we could distinguish it from user events. */
@@ -11051,6 +11056,24 @@ err_free:
 	free_event(event);
 err:
 	return ERR_PTR(err);
+}
+
+/**
+ * perf_event_create_kernel_counter
+ *
+ * @attr: attributes of the counter to create
+ * @cpu: cpu in which the counter is bound
+ * @task: task to profile (NULL for percpu)
+ */
+struct perf_event *
+perf_event_create_kernel_counter(struct perf_event_attr *attr, int cpu,
+				 struct task_struct *task,
+				 perf_overflow_handler_t overflow_handler,
+				 void *context)
+{
+	return perf_event_create_kernel_counter_flags(attr, cpu, task,
+						overflow_handler, context, 0,
+						false);
 }
 EXPORT_SYMBOL_GPL(perf_event_create_kernel_counter);
 

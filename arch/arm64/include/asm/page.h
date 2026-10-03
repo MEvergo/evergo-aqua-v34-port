@@ -47,6 +47,17 @@ extern int pfn_valid(unsigned long);
 
 #include <asm/memory.h>
 
+/*
+ * Arm64 has no private/encrypted RAM state that needs to be changed before
+ * the kernel can access a normal page.
+ */
+struct page;
+static inline int arch_make_page_accessible(struct page *page)
+{
+	(void)page;
+	return 0;
+}
+
 #endif /* !__ASSEMBLY__ */
 
 #define VM_DATA_DEFAULT_FLAGS \

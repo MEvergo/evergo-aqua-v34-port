@@ -41,6 +41,7 @@
 
 #include "sched.h"
 #include "../workqueue_internal.h"
+#include "../../io_uring/io-wq.h"
 #include "../smpboot.h"
 
 #include <mt-plat/perf_tracker.h>
@@ -179,6 +180,39 @@ struct rq *task_rq_lock(struct task_struct *p, struct rq_flags *rf)
 		while (unlikely(task_on_rq_migrating(p)))
 			cpu_relax();
 	}
+}
+
+/*
+ * Invoke a function on a task that is locked into a stable state.
+ */
+bool try_invoke_on_locked_down_task(struct task_struct *p,
+				    bool (*func)(struct task_struct *t,
+						 void *arg),
+				    void *arg)
+{
+	struct rq_flags rf;
+	bool ret = false;
+	struct rq *rq;
+
+	raw_spin_lock_irqsave(&p->pi_lock, rf.flags);
+	if (p->on_rq) {
+		rq = __task_rq_lock(p, &rf);
+		if (task_rq(p) == rq)
+			ret = func(p, arg);
+		rq_unlock(rq, &rf);
+	} else {
+		switch (p->state) {
+		case TASK_RUNNING:
+		case TASK_WAKING:
+			break;
+		default:
+			smp_rmb();
+			if (!p->on_rq)
+				ret = func(p, arg);
+		}
+	}
+	raw_spin_unlock_irqrestore(&p->pi_lock, rf.flags);
+	return ret;
 }
 
 /*
@@ -4979,7 +5013,17 @@ void __noreturn do_task_dead(void)
 
 static inline void sched_submit_work(struct task_struct *tsk)
 {
-	if (!tsk->state || tsk_is_pi_blocked(tsk))
+	unsigned int task_flags;
+
+	if (!tsk->state)
+		return;
+	task_flags = tsk->flags;
+	if (task_flags & PF_IO_WORKER) {
+		preempt_disable();
+		io_wq_worker_sleeping(tsk);
+		preempt_enable_no_resched();
+	}
+	if (tsk_is_pi_blocked(tsk))
 		return;
 	/*
 	 * If we are going to sleep and we have plugged IO queued,
@@ -4987,6 +5031,12 @@ static inline void sched_submit_work(struct task_struct *tsk)
 	 */
 	if (blk_needs_flush_plug(tsk))
 		blk_schedule_flush_plug(tsk);
+}
+
+static void sched_update_worker(struct task_struct *tsk)
+{
+	if (tsk->flags & PF_IO_WORKER)
+		io_wq_worker_running(tsk);
 }
 
 asmlinkage __visible void __sched schedule(void)
@@ -4999,6 +5049,7 @@ asmlinkage __visible void __sched schedule(void)
 		__schedule(false);
 		sched_preempt_enable_no_resched();
 	} while (need_resched());
+	sched_update_worker(tsk);
 }
 EXPORT_SYMBOL(schedule);
 

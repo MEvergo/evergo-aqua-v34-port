@@ -6,6 +6,10 @@
 #include <linux/vmalloc.h>
 #include <linux/splice.h>
 #include <net/checksum.h>
+#ifdef CONFIG_COMPAT
+#include <linux/compat.h>
+#endif
+
 
 #define PIPE_PARANOIA /* for now */
 
@@ -945,12 +949,12 @@ size_t iov_iter_single_seg_count(const struct iov_iter *i)
 }
 EXPORT_SYMBOL(iov_iter_single_seg_count);
 
-void iov_iter_kvec(struct iov_iter *i, int direction,
+void iov_iter_kvec(struct iov_iter *i, unsigned int direction,
 			const struct kvec *kvec, unsigned long nr_segs,
 			size_t count)
 {
-	BUG_ON(!(direction & ITER_KVEC));
-	i->type = direction;
+	WARN_ON(direction & ~(READ | WRITE));
+	i->type = ITER_KVEC | (direction & (READ | WRITE));
 	i->kvec = kvec;
 	i->nr_segs = nr_segs;
 	i->iov_offset = 0;
@@ -958,12 +962,12 @@ void iov_iter_kvec(struct iov_iter *i, int direction,
 }
 EXPORT_SYMBOL(iov_iter_kvec);
 
-void iov_iter_bvec(struct iov_iter *i, int direction,
+void iov_iter_bvec(struct iov_iter *i, unsigned int direction,
 			const struct bio_vec *bvec, unsigned long nr_segs,
 			size_t count)
 {
-	BUG_ON(!(direction & ITER_BVEC));
-	i->type = direction;
+	WARN_ON(direction & ~(READ | WRITE));
+	i->type = ITER_BVEC | (direction & (READ | WRITE));
 	i->bvec = bvec;
 	i->nr_segs = nr_segs;
 	i->iov_offset = 0;
@@ -971,13 +975,13 @@ void iov_iter_bvec(struct iov_iter *i, int direction,
 }
 EXPORT_SYMBOL(iov_iter_bvec);
 
-void iov_iter_pipe(struct iov_iter *i, int direction,
+void iov_iter_pipe(struct iov_iter *i, unsigned int direction,
 			struct pipe_inode_info *pipe,
 			size_t count)
 {
-	BUG_ON(direction != ITER_PIPE);
+	BUG_ON(direction != READ);
 	WARN_ON(pipe->nrbufs == pipe->buffers);
-	i->type = direction;
+	i->type = ITER_PIPE | READ;
 	i->pipe = pipe;
 	i->idx = (pipe->curbuf + pipe->nrbufs) & (pipe->buffers - 1);
 	i->iov_offset = 0;
@@ -1383,7 +1387,7 @@ const void *dup_iter(struct iov_iter *new, struct iov_iter *old, gfp_t flags)
 EXPORT_SYMBOL(dup_iter);
 
 /**
- * import_iovec() - Copy an array of &struct iovec from userspace
+ * __import_iovec() - Copy an array of &struct iovec from userspace
  *     into the kernel, check that it is valid, and initialize a new
  *     &struct iov_iter iterator to access it.
  *
@@ -1391,6 +1395,7 @@ EXPORT_SYMBOL(dup_iter);
  * @uvector: Pointer to the userspace array.
  * @nr_segs: Number of elements in userspace array.
  * @fast_segs: Number of elements in @iov.
+ * @compat: Whether @uvector uses the compat iovec layout.
  * @iov: (input and output parameter) Pointer to pointer to (usually small
  *     on-stack) kernel array.
  * @i: Pointer to iterator that will be initialized on success.
@@ -1402,16 +1407,28 @@ EXPORT_SYMBOL(dup_iter);
  * on-stack array was used or not (and regardless of whether this function
  * returns an error or not).
  *
- * Return: 0 on success or negative error code on error.
+ * Return: Bytes imported on success or a negative error code on error.
  */
-int import_iovec(int type, const struct iovec __user * uvector,
-		 unsigned nr_segs, unsigned fast_segs,
-		 struct iovec **iov, struct iov_iter *i)
+ssize_t __import_iovec(int type, const struct iovec __user *uvector,
+		       unsigned nr_segs, unsigned fast_segs,
+		       struct iovec **iov, struct iov_iter *i, bool compat)
 {
 	ssize_t n;
 	struct iovec *p;
-	n = rw_copy_check_uvector(type, uvector, nr_segs, fast_segs,
-				  *iov, &p);
+
+	if (compat) {
+#ifdef CONFIG_COMPAT
+		n = compat_rw_copy_check_uvector(type,
+				(const struct compat_iovec __user *)uvector,
+				nr_segs, fast_segs, *iov, &p);
+#else
+		*iov = NULL;
+		return -EINVAL;
+#endif
+	} else {
+		n = rw_copy_check_uvector(type, uvector, nr_segs, fast_segs,
+					  *iov, &p);
+	}
 	if (n < 0) {
 		if (p != *iov)
 			kfree(p);
@@ -1420,32 +1437,57 @@ int import_iovec(int type, const struct iovec __user * uvector,
 	}
 	iov_iter_init(i, type, p, nr_segs, n);
 	*iov = p == *iov ? NULL : p;
-	return 0;
+	return n;
+}
+
+int import_iovec(int type, const struct iovec __user *uvector,
+		 unsigned nr_segs, unsigned fast_segs,
+		 struct iovec **iov, struct iov_iter *i)
+{
+	ssize_t ret;
+
+	ret = __import_iovec(type, uvector, nr_segs, fast_segs, iov, i, false);
+	return ret < 0 ? ret : 0;
 }
 EXPORT_SYMBOL(import_iovec);
 
 #ifdef CONFIG_COMPAT
-#include <linux/compat.h>
-
-int compat_import_iovec(int type, const struct compat_iovec __user * uvector,
-		 unsigned nr_segs, unsigned fast_segs,
-		 struct iovec **iov, struct iov_iter *i)
+int compat_import_iovec(int type, const struct compat_iovec __user *uvector,
+			unsigned nr_segs, unsigned fast_segs,
+			struct iovec **iov, struct iov_iter *i)
 {
-	ssize_t n;
-	struct iovec *p;
-	n = compat_rw_copy_check_uvector(type, uvector, nr_segs, fast_segs,
-				  *iov, &p);
-	if (n < 0) {
-		if (p != *iov)
-			kfree(p);
-		*iov = NULL;
-		return n;
-	}
-	iov_iter_init(i, type, p, nr_segs, n);
-	*iov = p == *iov ? NULL : p;
-	return 0;
+	ssize_t ret;
+
+	ret = __import_iovec(type, (const struct iovec __user *)uvector,
+			     nr_segs, fast_segs, iov, i, true);
+	return ret < 0 ? ret : 0;
 }
 #endif
+void iov_iter_restore(struct iov_iter *i, struct iov_iter_state *state)
+{
+	if (WARN_ON_ONCE(!iov_iter_is_bvec(i) && !iter_is_iovec(i) &&
+			 !iov_iter_is_kvec(i)))
+		return;
+	i->iov_offset = state->iov_offset;
+	i->count = state->count;
+	/*
+	 * For the *vec iters, nr_segs + iov is constant - if we increment
+	 * the vec, then we also decrement the nr_segs count. Hence we don't
+	 * need to track both of these, just one is enough and we can deduct
+	 * the other from that. ITER_KVEC and ITER_IOVEC are the same struct
+	 * size, so we can just increment the iov pointer as they are unionzed.
+	 * ITER_BVEC _may_ be the same size on some archs, but on others it is
+	 * not. Be safe and handle it separately.
+	 */
+	BUILD_BUG_ON(sizeof(struct iovec) != sizeof(struct kvec));
+	if (iov_iter_is_bvec(i))
+		i->bvec -= state->nr_segs - i->nr_segs;
+	else
+		i->iov -= state->nr_segs - i->nr_segs;
+	i->nr_segs = state->nr_segs;
+}
+EXPORT_SYMBOL(iov_iter_restore);
+
 
 int import_single_range(int rw, void __user *buf, size_t len,
 		 struct iovec *iov, struct iov_iter *i)

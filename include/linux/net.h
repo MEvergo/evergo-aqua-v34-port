@@ -238,6 +238,14 @@ struct socket *sock_from_file(struct file *file, int *err);
 #define		     sockfd_put(sock) fput(sock->file)
 int net_ratelimit(void);
 
+int __sys_shutdown_sock(struct socket *sock, int how);
+struct file *do_accept(struct file *file, unsigned int file_flags,
+		       struct sockaddr __user *upeer_sockaddr,
+		       int __user *upeer_addrlen, int flags);
+int __sys_connect_file(struct file *file,
+		       struct __kernel_sockaddr_storage *address,
+		       int addrlen, int file_flags);
+
 #define net_ratelimited_function(function, ...)			\
 do {								\
 	if (net_ratelimit())					\

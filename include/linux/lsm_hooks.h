@@ -79,13 +79,13 @@
  * Security hooks for filesystem operations.
  *
  * @sb_alloc_security:
- *	Allocate and attach a security structure to the sb->s_security field.
- *	The s_security field is initialized to NULL when the structure is
- *	allocated.
+ *	Initialize the module's portion of the superblock security blob.
+ *	The LSM framework allocates and zeroes the shared s_security blob before
+ *	invoking this hook.
  *	@sb contains the super_block structure to be modified.
  *	Return 0 if operation was successful.
  * @sb_free_security:
- *	Deallocate and clear the sb->s_security field.
+ *	Release the module's portion of the superblock security blob.
  *	@sb contains the super_block structure to be modified.
  * @sb_statfs:
  *	Check permission before obtaining filesystem statistics for the @mnt
@@ -1491,6 +1491,7 @@ struct lsm_blob_sizes {
 	int	lbs_inode;
 	int	lbs_ipc;
 	int	lbs_msg_msg;
+	int	lbs_superblock;
 	int	lbs_task;
 };
 

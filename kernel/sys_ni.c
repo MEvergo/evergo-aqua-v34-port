@@ -228,6 +228,13 @@ cond_syscall(sys_eventfd);
 cond_syscall(sys_eventfd2);
 cond_syscall(sys_memfd_create);
 cond_syscall(sys_userfaultfd);
+cond_syscall(sys_io_uring_setup);
+cond_syscall(sys_io_uring_enter);
+cond_syscall(sys_io_uring_register);
+
+cond_syscall(sys_landlock_create_ruleset);
+cond_syscall(sys_landlock_add_rule);
+cond_syscall(sys_landlock_restrict_self);
 
 /* performance counters: */
 cond_syscall(sys_perf_event_open);

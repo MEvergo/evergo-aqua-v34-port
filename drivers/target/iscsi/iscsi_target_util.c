@@ -1260,7 +1260,7 @@ static int iscsit_do_rx_data(
 		return -1;
 
 	memset(&msg, 0, sizeof(struct msghdr));
-	iov_iter_kvec(&msg.msg_iter, READ | ITER_KVEC,
+	iov_iter_kvec(&msg.msg_iter, READ,
 		      count->iov, count->iov_count, data);
 
 	while (msg_data_left(&msg)) {
@@ -1317,7 +1317,7 @@ int tx_data(
 
 	memset(&msg, 0, sizeof(struct msghdr));
 
-	iov_iter_kvec(&msg.msg_iter, WRITE | ITER_KVEC,
+	iov_iter_kvec(&msg.msg_iter, WRITE,
 		      iov, iov_count, data);
 
 	while (msg_data_left(&msg)) {

@@ -211,4 +211,23 @@ static inline void put_dev_pagemap(struct dev_pagemap *pgmap)
 	if (pgmap)
 		percpu_ref_put(pgmap->ref);
 }
+
+/*
+ * Keep one live reference while walking a range. get_dev_pagemap() takes an
+ * additional reference when the cached mapping matches, so drop that extra
+ * reference and retain the cache's existing one.
+ */
+static inline struct dev_pagemap *get_dev_pagemap_cached(unsigned long pfn,
+							struct dev_pagemap **cached)
+{
+	struct dev_pagemap *new = get_dev_pagemap(pfn, *cached);
+
+	if (new == *cached)
+		put_dev_pagemap(new);
+	else {
+		put_dev_pagemap(*cached);
+		*cached = new;
+	}
+	return *cached;
+}
 #endif /* _LINUX_MEMREMAP_H_ */

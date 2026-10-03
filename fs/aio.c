@@ -1613,6 +1613,7 @@ static int io_submit_one(struct kioctx *ctx, struct iocb __user *user_iocb,
 	req->common.ki_complete = aio_complete;
 	req->common.ki_flags = iocb_flags(req->common.ki_filp) | IOCB_AIO_RW;
 	req->common.ki_hint = file_write_hint(file);
+	req->common.ki_ioprio = get_current_ioprio();
 
 	if (iocb->aio_flags & IOCB_FLAG_RESFD) {
 		/*

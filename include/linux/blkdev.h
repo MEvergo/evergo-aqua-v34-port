@@ -668,6 +668,7 @@ struct request_queue {
 #define QUEUE_FLAG_SCSI_PASSTHROUGH 27	/* queue supports SCSI commands */
 #define QUEUE_FLAG_QUIESCED    28	/* queue has been quiesced */
 #define QUEUE_FLAG_INLINECRYPT 29	/* inline crypto support */
+#define QUEUE_FLAG_NOWAIT       30	/* queue supports nonblocking I/O */
 
 #define QUEUE_FLAG_DEFAULT	((1 << QUEUE_FLAG_IO_STAT) |		\
 				 (1 << QUEUE_FLAG_STACKABLE)	|	\
@@ -677,7 +678,8 @@ struct request_queue {
 #define QUEUE_FLAG_MQ_DEFAULT	((1 << QUEUE_FLAG_IO_STAT) |		\
 				 (1 << QUEUE_FLAG_STACKABLE)	|	\
 				 (1 << QUEUE_FLAG_SAME_COMP)	|	\
-				 (1 << QUEUE_FLAG_POLL))
+				 (1 << QUEUE_FLAG_POLL)		|	\
+				 (1 << QUEUE_FLAG_NOWAIT))
 
 /*
  * @q->queue_lock is set while a queue is being initialized. Since we know
@@ -769,6 +771,7 @@ static inline void queue_flag_clear(unsigned int flag, struct request_queue *q)
 	test_bit(QUEUE_FLAG_SCSI_PASSTHROUGH, &(q)->queue_flags)
 #define blk_queue_inline_crypt(q) \
 	test_bit(QUEUE_FLAG_INLINECRYPT, &(q)->queue_flags)
+#define blk_queue_nowait(q)	test_bit(QUEUE_FLAG_NOWAIT, &(q)->queue_flags)
 
 #define blk_noretry_request(rq) \
 	((rq)->cmd_flags & (REQ_FAILFAST_DEV|REQ_FAILFAST_TRANSPORT| \

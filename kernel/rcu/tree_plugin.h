@@ -2692,3 +2692,21 @@ static void rcu_dynticks_task_exit(void)
 	WRITE_ONCE(current->rcu_tasks_idle_cpu, -1);
 #endif /* #if defined(CONFIG_TASKS_RCU) && defined(CONFIG_NO_HZ_FULL) */
 }
+
+/* Record the current task before entering a trace-RCU quiescent state. */
+static void rcu_dynticks_task_trace_enter(void)
+{
+#if defined(CONFIG_TASKS_TRACE_RCU)
+	if (IS_ENABLED(CONFIG_TASKS_TRACE_RCU_READ_MB))
+		WRITE_ONCE(current->trc_reader_special.b.need_mb, true);
+#endif /* #if defined(CONFIG_TASKS_TRACE_RCU) */
+}
+
+/* Record the current task after leaving a trace-RCU quiescent state. */
+static void rcu_dynticks_task_trace_exit(void)
+{
+#if defined(CONFIG_TASKS_TRACE_RCU)
+	if (IS_ENABLED(CONFIG_TASKS_TRACE_RCU_READ_MB))
+		WRITE_ONCE(current->trc_reader_special.b.need_mb, false);
+#endif /* #if defined(CONFIG_TASKS_TRACE_RCU) */
+}

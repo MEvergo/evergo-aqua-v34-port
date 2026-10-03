@@ -12,6 +12,7 @@
 
 struct pid;
 struct cred;
+struct socket;
 
 #define __sockaddr_check_size(size)	\
 	BUILD_BUG_ON(((size) > sizeof(struct __kernel_sockaddr_storage)))
@@ -49,7 +50,16 @@ struct msghdr {
 	void		*msg_name;	/* ptr to socket address structure */
 	int		msg_namelen;	/* size of socket address structure */
 	struct iov_iter	msg_iter;	/* data */
-	void		*msg_control;	/* ancillary data */
+	/*
+	 * Ancillary data. msg_control_user is the user buffer used for
+	 * recvmsg when msg_control_is_user is set; msg_control is the kernel
+	 * buffer used otherwise.
+	 */
+	union {
+		void		*msg_control;
+		void __user	*msg_control_user;
+	};
+	bool		msg_control_is_user : 1;
 	__kernel_size_t	msg_controllen;	/* ancillary data buffer length */
 	unsigned int	msg_flags;	/* flags on received message */
 	struct kiocb	*msg_iocb;	/* ptr to iocb for async requests */
@@ -348,6 +358,20 @@ struct ucred {
 
 extern int move_addr_to_kernel(void __user *uaddr, int ulen, struct sockaddr_storage *kaddr);
 extern int put_cmsg(struct msghdr*, int level, int type, int len, void *data);
+extern int __copy_msghdr_from_user(struct msghdr *kmsg,
+				   struct user_msghdr __user *umsg,
+				   struct sockaddr __user **save_addr,
+				   struct iovec __user **uiov,
+				   size_t *nsegs);
+extern int sendmsg_copy_msghdr(struct msghdr *msg,
+			       struct user_msghdr __user *umsg,
+			       unsigned flags, struct iovec **iov);
+extern long __sys_sendmsg_sock(struct socket *sock, struct msghdr *msg,
+			       unsigned int flags);
+extern long __sys_recvmsg_sock(struct socket *sock, struct msghdr *msg,
+			       struct user_msghdr __user *umsg,
+			       struct sockaddr __user *uaddr,
+			       unsigned int flags, unsigned int saved_flags);
 
 struct timespec;
 

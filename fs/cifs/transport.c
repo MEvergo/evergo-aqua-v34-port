@@ -272,7 +272,7 @@ __smb_send_rqst(struct TCP_Server_Info *server, struct smb_rqst *rqst)
 	for (i = 0; i < n_vec; i++)
 		size += iov[i].iov_len;
 
-	iov_iter_kvec(&smb_msg.msg_iter, WRITE | ITER_KVEC, iov, n_vec, size);
+	iov_iter_kvec(&smb_msg.msg_iter, WRITE, iov, n_vec, size);
 
 	rc = smb_send_kvec(server, &smb_msg, &sent);
 	if (rc < 0)
@@ -289,7 +289,7 @@ __smb_send_rqst(struct TCP_Server_Info *server, struct smb_rqst *rqst)
 			.bv_page = rqst->rq_pages[i],
 			.bv_len = len
 		};
-		iov_iter_bvec(&smb_msg.msg_iter, WRITE | ITER_BVEC,
+		iov_iter_bvec(&smb_msg.msg_iter, WRITE,
 			      &bvec, 1, len);
 		rc = smb_send_kvec(server, &smb_msg, &sent);
 		if (rc < 0)

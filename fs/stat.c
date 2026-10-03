@@ -216,6 +216,48 @@ int vfs_statx_fd(unsigned int fd, struct kstat *stat,
 }
 EXPORT_SYMBOL(vfs_statx_fd);
 
+/*
+ * Fill attributes for a resolved path and include mount-specific statx data.
+ */
+static int vfs_statx_path(const struct path *path, int flags,
+			  struct kstat *stat, u32 request_mask)
+{
+	int error;
+
+	error = vfs_getattr(path, stat, request_mask, flags);
+	if (!error) {
+		struct mount *mnt = real_mount(path->mnt);
+		int mnt_id = mnt->mnt_id;
+
+#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
+		struct inode *inode = d_backing_inode(path->dentry);
+		bool is_fuse = false;
+
+		if (susfs_is_current_app_uid() &&
+		    susfs_is_inode_sus_kstat(inode, &is_fuse)) {
+			unsigned long ino = inode->i_ino;
+
+			susfs_sus_kstat_spoof_proc_fd_seq_show(
+				&mnt_id, &ino, inode->i_sb->s_dev);
+		} else
+#endif
+		{
+#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
+			if (susfs_is_current_proc_umounted() &&
+			    mnt->mnt_id >= DEFAULT_KSU_MNT_ID)
+				mnt_id = susfs_get_non_sus_mnt_id_from_mnt(mnt);
+#endif
+		}
+		stat->mnt_id = mnt_id;
+		stat->result_mask |= STATX_MNT_ID;
+		if (path->mnt->mnt_root == path->dentry &&
+		    stat->mnt_id == mnt->mnt_id)
+			stat->attributes |= STATX_ATTR_MOUNT_ROOT;
+	}
+	stat->attributes_mask |= STATX_ATTR_MOUNT_ROOT;
+	return error;
+}
+
 /**
  * vfs_statx - Get basic and extra attributes by filename
  * @dfd: A file descriptor representing the base dir for a relative filename
@@ -254,37 +296,7 @@ retry:
 	if (error)
 		goto out;
 
-	error = vfs_getattr(&path, stat, request_mask, flags);
-	if (!error) {
-		struct mount *mnt = real_mount(path.mnt);
-		int mnt_id = mnt->mnt_id;
-
-#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
-		struct inode *inode = d_backing_inode(path.dentry);
-		bool is_fuse = false;
-
-		if (susfs_is_current_app_uid() &&
-		    susfs_is_inode_sus_kstat(inode, &is_fuse)) {
-			unsigned long ino = inode->i_ino;
-
-			susfs_sus_kstat_spoof_proc_fd_seq_show(
-				&mnt_id, &ino, inode->i_sb->s_dev);
-		} else
-#endif
-		{
-#ifdef CONFIG_KSU_SUSFS_SUS_MOUNT
-			if (susfs_is_current_proc_umounted() &&
-			    mnt->mnt_id >= DEFAULT_KSU_MNT_ID)
-				mnt_id = susfs_get_non_sus_mnt_id_from_mnt(mnt);
-#endif
-		}
-		stat->mnt_id = mnt_id;
-		stat->result_mask |= STATX_MNT_ID;
-		if (path.mnt->mnt_root == path.dentry &&
-		    stat->mnt_id == mnt->mnt_id)
-			stat->attributes |= STATX_ATTR_MOUNT_ROOT;
-	}
-	stat->attributes_mask |= STATX_ATTR_MOUNT_ROOT;
+	error = vfs_statx_path(&path, flags, stat, request_mask);
 	path_put(&path);
 	if (retry_estale(error, lookup_flags)) {
 		lookup_flags |= LOOKUP_REVAL;
@@ -644,6 +656,23 @@ cp_statx(const struct kstat *stat, struct statx __user *buffer)
 	return copy_to_user(buffer, &tmp, sizeof(tmp)) ? -EFAULT : 0;
 }
 
+int do_statx(int dfd, const char __user *filename, unsigned int flags,
+	     unsigned int mask, struct statx __user *buffer)
+{
+	struct kstat stat;
+	int error;
+
+	if (mask & STATX__RESERVED)
+		return -EINVAL;
+	if ((flags & AT_STATX_SYNC_TYPE) == AT_STATX_SYNC_TYPE)
+		return -EINVAL;
+
+	error = vfs_statx(dfd, filename, flags, &stat, mask);
+	if (error)
+		return error;
+	return cp_statx(&stat, buffer);
+}
+
 /**
  * sys_statx - System call to get enhanced stats
  * @dfd: Base directory to pathwalk from *or* fd to stat.
@@ -660,19 +689,7 @@ SYSCALL_DEFINE5(statx,
 		unsigned int, mask,
 		struct statx __user *, buffer)
 {
-	struct kstat stat;
-	int error;
-
-	if (mask & STATX__RESERVED)
-		return -EINVAL;
-	if ((flags & AT_STATX_SYNC_TYPE) == AT_STATX_SYNC_TYPE)
-		return -EINVAL;
-
-	error = vfs_statx(dfd, filename, flags, &stat, mask);
-	if (error)
-		return error;
-
-	return cp_statx(&stat, buffer);
+	return do_statx(dfd, filename, flags, mask, buffer);
 }
 
 #ifdef CONFIG_COMPAT

@@ -78,12 +78,20 @@ config TASKS_RCU
 
 config TASKS_TRACE_RCU
 	def_bool 0
+	select IRQ_WORK
 	help
 	  This option enables a task-based RCU implementation that uses
 	  explicit rcu_read_lock_trace() read-side markers, and allows
-	  these readers to appear in the idle loop as well as on the CPU
-	  hotplug code paths.  It can force IPIs on online CPUs, including
-	  idle ones, so use with caution.
+	  these readers to appear in the idle loop as well as on CPU-hotplug
+	  code paths.
+
+config TASKS_TRACE_RCU_READ_MB
+	bool "Tasks Trace RCU readers use memory barriers in user and idle"
+	depends on RCU_EXPERT
+	default PREEMPT_RT || NR_CPUS < 8
+	help
+	  Use memory barriers to detect Tasks Trace RCU readers in user and
+	  idle execution.
 
 config RCU_STALL_COMMON
 	def_bool ( TREE_RCU || PREEMPT_RCU )

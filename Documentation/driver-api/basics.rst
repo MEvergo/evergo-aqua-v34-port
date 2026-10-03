@@ -13,6 +13,34 @@ Driver device table
 .. kernel-doc:: include/linux/mod_devicetable.h
    :internal:
 
+Kernel hardware-breakpoint stepping
+-----------------------------------
+
+Kernel consumers can use ``register_user_hw_breakpoint_flags()`` with
+``HW_BREAKPOINT_FLAG_STEP_ON_HIT`` to request ARM64's automatic step-over
+behavior for a custom overflow callback. The execute and watchpoint handlers
+disable the relevant debug registers, perform one instruction step, and
+restore them through the existing single-step path. The callback does not
+need to advance the PC or install its own stepping logic.
+
+The flags are per event and kernel-only: ``perf_event_attr``, ptrace and
+existing user interfaces are unchanged. The original registration helper and
+unflagged custom callbacks retain their previous behavior. The default perf
+handler continues to auto-step. Watchpoints taken during kernel uaccess keep
+their existing callback-skipping and stepping behavior.
+
+Registration allocates the event disabled, stores the flags, and restores the
+requested enabled state before publishing the event to the task. This avoids
+first-hit, concurrent-fork and enable-on-exec windows. The caller's attributes
+are not modified. Flags survive breakpoint modifications, caller-driven
+rollback and callback inheritance. Unknown flags return ``ERR_PTR(-EINVAL)``;
+without hardware-breakpoint support the helper returns ``ERR_PTR(-ENOSYS)``.
+Removal still uses ``unregister_hw_breakpoint()``.
+
+.. kernel-doc:: kernel/events/hw_breakpoint.c
+   :functions: register_user_hw_breakpoint_flags
+
+
 Atomic and pointer manipulation
 -------------------------------
 

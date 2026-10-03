@@ -637,6 +637,10 @@ struct perf_event {
 	u16				id_header_size;
 	u16				read_size;
 	struct hw_perf_event		hw;
+#ifdef CONFIG_HAVE_HW_BREAKPOINT
+	/* Kernel-only hardware breakpoint behavior flags. */
+	unsigned long			hw_breakpoint_flags;
+#endif
 
 	struct perf_event_context	*ctx;
 	atomic_long_t			refcount;

@@ -26,16 +26,19 @@ config KSU_MANUAL_SU
       Use manual su and authorize the corresponding command line and application via prctl
 
 config KPM
-    bool "Enable SukiSU KPM"
-    depends on KSU && 64BIT
-    default n
-    help
-      Enabling this option will activate the KPM feature of SukiSU.
-      This option is suitable for scenarios where you need to force KPM to be enabled.
-      but it may affect system stability.
-    select KALLSYMS
-    select KALLSYMS_ALL
-
+	bool "Enable native ARM64 KernelPatch KPM support"
+	depends on ARM64 && KSU=y && 64BIT && MMU && ARCH_HAS_SET_MEMORY
+	default n
+	help
+	  Enable an in-vmlinux loader for ARM64 KernelPatch KPM ELF objects.
+	  It supports isolated load/control, ctl0/ctl1 callbacks, audited symbol
+	  lookup, managed inline/function-pointer chains, and native/compat
+	  syscall hooks. Managed hooks are removed during module unload; direct
+	  hooks and raw hotpatches pin their owner because safe generic draining
+	  is unavailable. The adapter rejects `.kpm.event` boot-event metadata.
+	  Loaded KPM code runs with kernel privilege; load only trusted objects.
+	select KALLSYMS
+	select KALLSYMS_ALL
 config KSU_DISABLE_MANAGER
 	bool "Disable KernelSU manager integration"
 	depends on KSU

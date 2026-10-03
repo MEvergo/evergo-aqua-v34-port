@@ -565,6 +565,12 @@ int arch_validate_hwbkpt_settings(struct perf_event *bp)
 		else
 			alignment_mask = 0x7;
 		offset = info->address & alignment_mask;
+		if (info->ctrl.type == ARM_BREAKPOINT_EXECUTE && offset)
+			return -EINVAL;
+
+		/* BAS is eight bits; reject a range before shifting it away. */
+		if (((u32)info->ctrl.len << offset) > ARM_BREAKPOINT_LEN_8)
+			return -EINVAL;
 	}
 
 	info->address &= ~alignment_mask;
@@ -662,7 +668,8 @@ static int breakpoint_handler(unsigned long unused, unsigned int esr,
 		perf_bp_event(bp, regs);
 
 		/* Do we need to handle the stepping? */
-		if (uses_default_overflow_handler(bp))
+		if (uses_default_overflow_handler(bp) ||
+		    (bp->hw_breakpoint_flags & HW_BREAKPOINT_FLAG_STEP_ON_HIT))
 			step = 1;
 unlock:
 		rcu_read_unlock();
@@ -741,7 +748,8 @@ static u64 get_distance_from_watchpoint(unsigned long addr, u64 val,
 static int watchpoint_report(struct perf_event *wp, unsigned long addr,
 			     struct pt_regs *regs)
 {
-	int step = uses_default_overflow_handler(wp);
+	int step = uses_default_overflow_handler(wp) ||
+		   (wp->hw_breakpoint_flags & HW_BREAKPOINT_FLAG_STEP_ON_HIT);
 	struct arch_hw_breakpoint *info = counter_arch_bp(wp);
 
 	info->trigger = addr;
@@ -805,12 +813,12 @@ static int watchpoint_handler(unsigned long addr, unsigned int esr,
 		if (dist != 0)
 			continue;
 
-		step = watchpoint_report(wp, addr, regs);
+		step |= watchpoint_report(wp, addr, regs);
 	}
 
 	/* No exact match found? */
 	if (min_dist > 0 && min_dist != -1)
-		step = watchpoint_report(slots[closest_match], addr, regs);
+		step |= watchpoint_report(slots[closest_match], addr, regs);
 
 	rcu_read_unlock();
 

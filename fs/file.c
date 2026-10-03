@@ -567,9 +567,15 @@ static int alloc_fd(unsigned start, unsigned flags)
 	return __alloc_fd(current->files, start, rlimit(RLIMIT_NOFILE), flags);
 }
 
+int __get_unused_fd_flags(unsigned flags, unsigned long nofile)
+{
+	return __alloc_fd(current->files, 0,
+			  min_t(unsigned long, nofile, UINT_MAX), flags);
+}
+
 int get_unused_fd_flags(unsigned flags)
 {
-	return __alloc_fd(current->files, 0, rlimit(RLIMIT_NOFILE), flags);
+	return __get_unused_fd_flags(flags, rlimit(RLIMIT_NOFILE));
 }
 EXPORT_SYMBOL(get_unused_fd_flags);
 
@@ -687,6 +693,34 @@ int __close_fd(struct files_struct *files, unsigned fd)
 		return -EBADF;
 
 	return filp_close(file, files);
+}
+
+/*
+ * The caller must hold current->files->file_lock. The returned file has an
+ * extra reference; the caller must filp_close() the descriptor reference and
+ * fput() the returned reference.
+ */
+int __close_fd_get_file(unsigned int fd, struct file **res)
+{
+	struct files_struct *files = current->files;
+	struct fdtable *fdt = files_fdtable(files);
+	struct file *file;
+
+	*res = NULL;
+	if (fd >= fdt->max_fds)
+		return -ENOENT;
+
+	fd = array_index_nospec(fd, fdt->max_fds);
+	file = fdt->fd[fd];
+	if (!file)
+		return -ENOENT;
+
+	rcu_assign_pointer(fdt->fd[fd], NULL);
+	__clear_close_on_exec(fd, fdt);
+	__put_unused_fd(files, fd);
+	get_file(file);
+	*res = file;
+	return 0;
 }
 
 /**

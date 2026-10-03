@@ -712,6 +712,18 @@ struct iomap_dio {
 	};
 };
 
+int iomap_dio_iopoll(struct kiocb *iocb, bool spin)
+{
+	struct request_queue *q = READ_ONCE(iocb->private);
+	blk_qc_t cookie = READ_ONCE(iocb->ki_cookie);
+
+	(void)spin;
+	if (!q || !blk_qc_t_valid(cookie))
+		return 0;
+	return blk_mq_poll(q, cookie);
+}
+EXPORT_SYMBOL_GPL(iomap_dio_iopoll);
+
 static ssize_t iomap_dio_complete(struct iomap_dio *dio)
 {
 	struct kiocb *iocb = dio->iocb;
@@ -838,6 +850,8 @@ iomap_dio_zero(struct iomap_dio *dio, struct iomap *iomap, loff_t pos,
 		iomap->blkno + ((pos - iomap->offset) >> 9);
 	bio->bi_private = dio;
 	bio->bi_end_io = iomap_dio_bio_end_io;
+	bio->bi_write_hint = dio->iocb->ki_hint;
+	bio->bi_ioprio = dio->iocb->ki_ioprio;
 
 	get_page(page);
 	if (bio_add_page(bio, page, len, 0) != len)
@@ -845,7 +859,14 @@ iomap_dio_zero(struct iomap_dio *dio, struct iomap *iomap, loff_t pos,
 	bio_set_op_attrs(bio, REQ_OP_WRITE, REQ_SYNC | REQ_IDLE);
 
 	atomic_inc(&dio->ref);
-	return submit_bio(bio);
+	if (dio->iocb->ki_flags & IOCB_HIPRI) {
+		bio->bi_opf |= REQ_HIPRI;
+		if (!is_sync_kiocb(dio->iocb))
+			bio->bi_opf |= REQ_NOWAIT;
+	}
+	dio->submit.last_queue = bdev_get_queue(iomap->bdev);
+	dio->submit.cookie = submit_bio(bio);
+	return dio->submit.cookie;
 }
 
 static loff_t
@@ -918,6 +939,7 @@ iomap_dio_actor(struct inode *inode, loff_t pos, loff_t length,
 		bio->bi_iter.bi_sector =
 			iomap->blkno + ((pos - iomap->offset) >> 9);
 		bio->bi_write_hint = dio->iocb->ki_hint;
+		bio->bi_ioprio = dio->iocb->ki_ioprio;
 		bio->bi_private = dio;
 		bio->bi_end_io = iomap_dio_bio_end_io;
 
@@ -934,6 +956,11 @@ iomap_dio_actor(struct inode *inode, loff_t pos, loff_t length,
 			bio_set_op_attrs(bio, REQ_OP_READ, 0);
 			if (dio->flags & IOMAP_DIO_DIRTY)
 				bio_set_pages_dirty(bio);
+		}
+		if (dio->iocb->ki_flags & IOCB_HIPRI) {
+			bio->bi_opf |= REQ_HIPRI;
+			if (!is_sync_kiocb(dio->iocb))
+				bio->bi_opf |= REQ_NOWAIT;
 		}
 
 		dio->size += bio->bi_iter.bi_size;
@@ -1070,6 +1097,8 @@ iomap_dio_rw(struct kiocb *iocb, struct iov_iter *iter,
 		}
 	} while ((count = iov_iter_count(iter)) > 0);
 	blk_finish_plug(&plug);
+	WRITE_ONCE(iocb->ki_cookie, dio->submit.cookie);
+	WRITE_ONCE(iocb->private, dio->submit.last_queue);
 
 	if (ret < 0)
 		iomap_dio_set_error(dio, ret);

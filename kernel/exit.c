@@ -4,6 +4,7 @@
  *  Copyright (C) 1991, 1992  Linus Torvalds
  */
 
+#include <linux/rcupdate_trace.h>
 #include <linux/mm.h>
 #include <linux/slab.h>
 #include <linux/sched/autogroup.h>
@@ -19,6 +20,7 @@
 #include <linux/personality.h>
 #include <linux/tty.h>
 #include <linux/iocontext.h>
+#include <linux/io_uring.h>
 #include <linux/key.h>
 #include <linux/cpu.h>
 #include <linux/acct.h>
@@ -875,6 +877,7 @@ void __noreturn do_exit(long code)
 		schedule();
 	}
 
+	io_uring_files_cancel();
 	exit_signals(tsk);  /* sets PF_EXITING */
 
 	/* sync mm's RSS info before statistics gathering */
@@ -973,6 +976,7 @@ void __noreturn do_exit(long code)
 		__this_cpu_add(dirty_throttle_leaks, tsk->nr_dirtied);
 	exit_rcu();
 	exit_tasks_rcu_finish();
+	exit_tasks_rcu_finish_trace(tsk);
 
 	lockdep_free_task(tsk);
 	do_task_dead();

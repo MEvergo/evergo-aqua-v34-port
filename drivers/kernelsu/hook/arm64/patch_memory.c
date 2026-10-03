@@ -11,6 +11,8 @@
 #include "linux/gfp.h" // IWYU pragma: keep
 #include "linux/uaccess.h"
 #include "linux/stop_machine.h"
+#include "linux/string.h"
+#include "linux/errno.h"
 #include "asm/cacheflush.h"
 #include "asm-generic/fixmap.h"
 
@@ -289,6 +291,93 @@ int ksu_patch_text(void *dst, void *src, size_t len, int flags)
 
     return stop_machine(ksu_patch_text_cb, &info, cpu_online_mask);
 }
+
+#ifdef CONFIG_KPM
+#define KSU_PATCH_BATCH_MAX 64
+
+struct patch_text_batch_info {
+	const struct ksu_patch_text_op *ops;
+	size_t count;
+	atomic_t cpu_count;
+	int result;
+};
+
+static int ksu_patch_text_batch_cb(void *arg)
+{
+	struct patch_text_batch_info *batch = arg;
+	size_t applied = 0;
+	int rollback_failed = 0;
+	int result = 0;
+
+	if (atomic_inc_return(&batch->cpu_count) == num_online_cpus()) {
+		size_t i;
+
+		for (i = 0; i < batch->count; i++) {
+			const struct ksu_patch_text_op *op = &batch->ops[i];
+
+			if (memcmp(op->dst, op->expected, op->len)) {
+				result = -EBUSY;
+				goto rollback;
+			}
+			result = ksu_patch_text_nosync(
+				op->dst, (void *)op->src, op->len,
+				KSU_PATCH_TEXT_FLUSH_DCACHE |
+					KSU_PATCH_TEXT_FLUSH_ICACHE);
+			if (result) {
+				applied = i + 1;
+				goto rollback;
+			}
+			applied = i + 1;
+		}
+		goto done;
+
+rollback:
+		while (applied) {
+			const struct ksu_patch_text_op *op;
+
+			op = &batch->ops[--applied];
+			if (ksu_patch_text_nosync(
+				    op->dst, (void *)op->expected, op->len,
+				    KSU_PATCH_TEXT_FLUSH_DCACHE |
+					    KSU_PATCH_TEXT_FLUSH_ICACHE))
+				rollback_failed = 1;
+		}
+		if (rollback_failed)
+			result = -EUCLEAN;
+done:
+		batch->result = result;
+		atomic_inc(&batch->cpu_count);
+	} else {
+		while (atomic_read(&batch->cpu_count) <= num_online_cpus())
+			cpu_relax();
+		isb();
+	}
+	return result;
+}
+
+int ksu_patch_text_batch(const struct ksu_patch_text_op *ops, size_t count)
+{
+	struct patch_text_batch_info batch;
+	size_t i;
+	int error;
+
+	if (!count)
+		return 0;
+	if (!ops || count > KSU_PATCH_BATCH_MAX)
+		return -EINVAL;
+	for (i = 0; i < count; i++) {
+		if (!ops[i].dst || !ops[i].src || !ops[i].expected ||
+		    !ops[i].len)
+			return -EINVAL;
+	}
+	batch.ops = ops;
+	batch.count = count;
+	atomic_set(&batch.cpu_count, 0);
+	batch.result = -EAGAIN;
+	error = stop_machine(ksu_patch_text_batch_cb, &batch, cpu_online_mask);
+	return error ? error : batch.result;
+}
+#endif
 
 /*
  * Scan the memory region [start, start+size) for a BL instruction whose

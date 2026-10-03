@@ -15,6 +15,7 @@
  * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
  * General Public License for more details.
  */
+#include <linux/input/mt.h>
 #include "goodix_ts_core.h"
 #include "goodix_cfg_bin.h"
 #include "goodix_default_fw.h"
@@ -588,6 +589,8 @@ static int goodix_update_prepare(struct fw_update_ctrl *fwu_ctrl)
 	ts_dev->hw_ops->write(ts_dev, HW_REG_CPU_RUN_FROM, temp_buf, 8);
 
 	/*reset IC*/
+	if (fwu_ctrl->core_data->input_dev)
+		input_mt_overlay_reset(fwu_ctrl->core_data->input_dev);
 	fwu_ctrl->allow_reset = true;
 	ts_info("normandy firmware update, reset");
 	gpio_direction_output(ts_dev->board_data->reset_gpio, 0);
@@ -940,6 +943,8 @@ static int goodix_update_finish(struct goodix_ts_device *ts_dev,
 		ts_err("Failed to run ss51");
 
 	/*reset*/
+	if (fwu_ctrl->core_data->input_dev)
+		input_mt_overlay_reset(fwu_ctrl->core_data->input_dev);
 	r = ts_dev->hw_ops->reset(ts_dev);
 
 	return r;

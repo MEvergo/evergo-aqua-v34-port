@@ -27,6 +27,7 @@
 #include <linux/device.h>
 #include <linux/cdev.h>
 #include "input-compat.h"
+#include "input-mt-overlay.h"
 
 enum evdev_clock_type {
 	EV_CLK_REAL = 0,
@@ -919,8 +920,9 @@ static int evdev_handle_get_val(struct evdev_client *client,
 	spin_lock_irq(&dev->event_lock);
 	spin_lock(&client->buffer_lock);
 
-	memcpy(mem, bits, len);
-
+	if (!(type == EV_KEY &&
+	      input_mt_overlay_copy_keys_locked(dev, mem)))
+		memcpy(mem, bits, len);
 	spin_unlock(&dev->event_lock);
 
 	__evdev_flush_queue(client, type);
@@ -942,22 +944,39 @@ static int evdev_handle_mt_request(struct input_dev *dev,
 {
 	const struct input_mt *mt = dev->mt;
 	unsigned int code;
-	int max_slots;
-	int i;
+	unsigned int count, i;
+	int *values = NULL;
+	unsigned long flags;
+	int error = 0;
 
 	if (get_user(code, &ip[0]))
 		return -EFAULT;
-	if (!mt || !input_is_mt_value(code))
+	if (!mt || !input_is_mt_value(code) || size < sizeof(__u32))
 		return -EINVAL;
 
-	max_slots = (size - sizeof(__u32)) / sizeof(__s32);
-	for (i = 0; i < mt->num_slots && i < max_slots; i++) {
-		int value = input_mt_get_value(&mt->slots[i], code);
-		if (put_user(value, &ip[1 + i]))
-			return -EFAULT;
+	count = min_t(unsigned int, mt->num_slots,
+		      (size - sizeof(__u32)) / sizeof(__s32));
+	if (count) {
+		values = kmalloc_array(count, sizeof(*values), GFP_KERNEL);
+		if (!values)
+			return -ENOMEM;
 	}
 
-	return 0;
+	spin_lock_irqsave(&dev->event_lock, flags);
+	if (!input_mt_overlay_copy_slots_locked(dev, code, values, count)) {
+		for (i = 0; i < count; i++)
+			values[i] = input_mt_get_value(&mt->slots[i], code);
+	}
+	spin_unlock_irqrestore(&dev->event_lock, flags);
+
+	for (i = 0; i < count; i++) {
+		if (put_user(values[i], &ip[1 + i])) {
+			error = -EFAULT;
+			break;
+		}
+	}
+	kfree(values);
+	return error;
 }
 
 static int evdev_revoke(struct evdev *evdev, struct evdev_client *client,
@@ -1227,7 +1246,10 @@ static long evdev_do_ioctl(struct file *file, unsigned int cmd,
 				return -EINVAL;
 
 			t = _IOC_NR(cmd) & ABS_MAX;
+			spin_lock_irq(&dev->event_lock);
 			abs = dev->absinfo[t];
+			input_mt_overlay_get_abs_locked(dev, t, &abs.value);
+			spin_unlock_irq(&dev->event_lock);
 
 			if (copy_to_user(p, &abs, min_t(size_t,
 					size, sizeof(struct input_absinfo))))

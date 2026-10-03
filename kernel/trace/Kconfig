@@ -29,6 +29,9 @@ config HAVE_DYNAMIC_FTRACE
 	help
 	  See Documentation/trace/ftrace-design.txt
 
+
+config HAVE_PATCHABLE_FUNCTION_ENTRY
+	bool
 config HAVE_DYNAMIC_FTRACE_WITH_REGS
 	bool
 

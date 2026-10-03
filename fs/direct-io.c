@@ -152,6 +152,19 @@ struct dio {
 } ____cacheline_aligned_in_smp;
 
 static struct kmem_cache *dio_cache __read_mostly;
+int blockdev_direct_IO_iopoll(struct kiocb *iocb, bool spin)
+{
+	struct request_queue *q = READ_ONCE(iocb->private);
+	blk_qc_t cookie = READ_ONCE(iocb->ki_cookie);
+
+	(void)spin;
+	if (!q || !blk_qc_t_valid(cookie))
+		return 0;
+	return blk_mq_poll(q, cookie);
+}
+
+EXPORT_SYMBOL_GPL(blockdev_direct_IO_iopoll);
+
 
 /*
  * How many pages are in the queue?
@@ -446,6 +459,12 @@ dio_bio_alloc(struct dio *dio, struct dio_submit *sdio,
 	bio_set_dev(bio, bdev);
 	bio->bi_iter.bi_sector = first_sector;
 	bio_set_op_attrs(bio, dio->op, dio->op_flags);
+	bio->bi_ioprio = dio->iocb->ki_ioprio;
+	if (dio->iocb->ki_flags & IOCB_HIPRI) {
+		bio->bi_opf |= REQ_HIPRI;
+		if (dio->is_async)
+			bio->bi_opf |= REQ_NOWAIT;
+	}
 	if (dio->is_async)
 		bio->bi_end_io = dio_bio_end_aio;
 	else
@@ -1377,6 +1396,11 @@ do_blockdev_direct_IO(struct kiocb *iocb, struct inode *inode,
 		dio_bio_submit(dio, &sdio);
 
 	blk_finish_plug(&plug);
+	if (dio->is_async && (iocb->ki_flags & IOCB_HIPRI)) {
+		WRITE_ONCE(iocb->ki_cookie, dio->bio_cookie);
+		WRITE_ONCE(iocb->private,
+			   dio->bio_disk ? dio->bio_disk->queue : NULL);
+	}
 
 	/*
 	 * It is possible that, we return short IO due to end of file.

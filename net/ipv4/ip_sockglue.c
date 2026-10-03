@@ -1495,6 +1495,7 @@ static int do_ip_getsockopt(struct sock *sk, int level, int optname,
 			return -ENOPROTOOPT;
 
 		msg.msg_control = (__force void *) optval;
+		msg.msg_control_is_user = true;
 		msg.msg_controllen = len;
 		msg.msg_flags = flags;
 

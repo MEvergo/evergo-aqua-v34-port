@@ -29,6 +29,7 @@ struct kernel_clone_args {
 	pid_t *set_tid;
 	/* Number of elements in *set_tid */
 	size_t set_tid_size;
+	int io_thread;
 };
 
 /*
@@ -103,6 +104,7 @@ extern long _do_fork(struct kernel_clone_args *kargs);
 extern bool legacy_clone_args_valid(const struct kernel_clone_args *kargs);
 extern long do_fork(unsigned long, unsigned long, unsigned long, int __user *, int __user *);
 struct task_struct *fork_idle(int);
+struct task_struct *create_io_thread(int (*fn)(void *), void *arg, int node);
 extern pid_t kernel_thread(int (*fn)(void *), void *arg, unsigned long flags);
 extern long kernel_wait4(pid_t, int __user *, int, struct rusage *);
 
@@ -115,13 +117,23 @@ extern void sched_exec(void);
 #define sched_exec()   {}
 #endif
 
-#define get_task_struct(tsk) do { atomic_inc(&(tsk)->usage); } while(0)
+static inline struct task_struct *get_task_struct(struct task_struct *tsk)
+{
+	atomic_inc(&tsk->usage);
+	return tsk;
+}
 
 extern void __put_task_struct(struct task_struct *t);
 
 static inline void put_task_struct(struct task_struct *t)
 {
 	if (atomic_dec_and_test(&t->usage))
+		__put_task_struct(t);
+}
+
+static inline void put_task_struct_many(struct task_struct *t, unsigned int nr)
+{
+	if (atomic_sub_and_test(nr, &t->usage))
 		__put_task_struct(t);
 }
 

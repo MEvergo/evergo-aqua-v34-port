@@ -9,12 +9,15 @@
  * 2 of the License, or (at your option) any later version.
  */
 
+#include <uapi/linux/openat2.h>
+
 struct super_block;
 struct file_system_type;
 struct iomap;
 struct iomap_ops;
 struct linux_binprm;
 struct path;
+struct filename;
 struct mount;
 struct shrink_control;
 
@@ -107,6 +110,10 @@ struct open_flags {
 	int intent;
 	int lookup_flags;
 };
+extern struct open_how build_open_how(int flags, umode_t mode);
+extern int build_open_flags(const struct open_how *how,
+			    struct open_flags *op);
+
 extern struct file *do_filp_open(int dfd, struct filename *pathname,
 		const struct open_flags *op);
 extern struct file *do_file_open_root(struct dentry *, struct vfsmount *,

@@ -12,55 +12,47 @@
 #include <linux/rcupdate.h>
 
 #ifdef CONFIG_DEBUG_LOCK_ALLOC
-
 extern struct lockdep_map rcu_trace_lock_map;
 
 static inline int rcu_read_lock_trace_held(void)
 {
 	return lock_is_held(&rcu_trace_lock_map);
 }
-
-#else /* #ifdef CONFIG_DEBUG_LOCK_ALLOC */
-
+#else
 static inline int rcu_read_lock_trace_held(void)
 {
 	return 1;
 }
-
-#endif /* #else #ifdef CONFIG_DEBUG_LOCK_ALLOC */
+#endif
 
 #ifdef CONFIG_TASKS_TRACE_RCU
 
-void rcu_read_unlock_trace_special(struct task_struct *t);
+void rcu_read_unlock_trace_special(struct task_struct *t, int nesting);
+void exit_tasks_rcu_finish_trace(struct task_struct *t);
 
 /**
- * rcu_read_lock_trace - mark beginning of RCU-trace read-side critical section
+ * rcu_read_lock_trace - mark beginning of an RCU-trace read-side section
  *
- * When synchronize_rcu_trace() is invoked by one task, then that task
- * is guaranteed to block until all other tasks exit their read-side
- * critical sections.  Similarly, if call_rcu_trace() is invoked on one
- * task while other tasks are within RCU read-side critical sections,
- * invocation of the corresponding RCU callback is deferred until after
- * the all the other tasks exit their critical sections.
- *
- * For more details, please see the documentation for rcu_read_lock().
+ * Tasks Trace RCU readers may execute in idle and CPU-hotplug paths. Its
+ * explicit reader markers let the grace-period worker wait for active readers
+ * without imposing restrictions on where those readers run.
  */
 static inline void rcu_read_lock_trace(void)
 {
 	struct task_struct *t = current;
 
 	WRITE_ONCE(t->trc_reader_nesting, READ_ONCE(t->trc_reader_nesting) + 1);
+	barrier();
+	if (IS_ENABLED(CONFIG_TASKS_TRACE_RCU_READ_MB) &&
+	    t->trc_reader_special.b.need_mb)
+		smp_mb();
 	rcu_lock_acquire(&rcu_trace_lock_map);
 }
 
 /**
- * rcu_read_unlock_trace - mark end of RCU-trace read-side critical section
+ * rcu_read_unlock_trace - mark the end of an RCU-trace read-side section
  *
- * Pairs with a preceding call to rcu_read_lock_trace(), and nesting is
- * allowed.  Invoking a rcu_read_unlock_trace() when there is no matching
- * rcu_read_lock_trace() is verboten, and will result in lockdep complaints.
- *
- * For more details, please see the documentation for rcu_read_unlock().
+ * Pairs with a preceding rcu_read_lock_trace(); nesting is allowed.
  */
 static inline void rcu_read_unlock_trace(void)
 {
@@ -69,16 +61,27 @@ static inline void rcu_read_unlock_trace(void)
 
 	rcu_lock_release(&rcu_trace_lock_map);
 	nesting = READ_ONCE(t->trc_reader_nesting) - 1;
-	WRITE_ONCE(t->trc_reader_nesting, nesting);
-	if (likely(!READ_ONCE(t->trc_reader_need_end)) || nesting)
-		return;  // We assume shallow reader nesting.
-	rcu_read_unlock_trace_special(t);
+	barrier();
+	WRITE_ONCE(t->trc_reader_nesting, INT_MIN);
+	if (likely(!READ_ONCE(t->trc_reader_special.s)) || nesting) {
+		WRITE_ONCE(t->trc_reader_nesting, nesting);
+		return;
+	}
+	rcu_read_unlock_trace_special(t, nesting);
 }
 
 void call_rcu_tasks_trace(struct rcu_head *rhp, rcu_callback_t func);
 void synchronize_rcu_tasks_trace(void);
 void rcu_barrier_tasks_trace(void);
-
-#endif /* #ifdef CONFIG_TASKS_TRACE_RCU */
+#else
+/* The BPF JIT forms these addresses even when it does not call them. */
+static inline void rcu_read_lock_trace(void) { BUG(); }
+static inline void rcu_read_unlock_trace(void) { BUG(); }
+static inline void call_rcu_tasks_trace(struct rcu_head *rhp,
+					rcu_callback_t func) { BUG(); }
+static inline void synchronize_rcu_tasks_trace(void) { BUG(); }
+static inline void rcu_barrier_tasks_trace(void) { BUG(); }
+static inline void exit_tasks_rcu_finish_trace(struct task_struct *t) { }
+#endif /* CONFIG_TASKS_TRACE_RCU */
 
 #endif /* __LINUX_RCUPDATE_TRACE_H */

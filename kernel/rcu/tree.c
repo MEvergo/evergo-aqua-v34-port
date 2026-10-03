@@ -381,6 +381,28 @@ int rcu_dynticks_snap(struct rcu_dynticks *rdtp)
 }
 
 /*
+ * Return true if the referenced integer is zero while the specified
+ * CPU remains within a single extended quiescent state.
+ */
+bool rcu_dynticks_zero_in_eqs(int cpu, int *vp)
+{
+	struct rcu_dynticks *rdtp = &per_cpu(rcu_dynticks, cpu);
+	int snap;
+
+	/* If not quiescent, force back to earlier extended quiescent state. */
+	snap = atomic_read(&rdtp->dynticks) & ~(RCU_DYNTICK_CTRL_MASK |
+					       RCU_DYNTICK_CTRL_CTR);
+
+	smp_rmb(); /* Order ->dynticks and *vp reads. */
+	if (READ_ONCE(*vp))
+		return false;
+	smp_rmb(); /* Order *vp read and ->dynticks re-read. */
+
+	return snap == (atomic_read(&rdtp->dynticks) &
+			~RCU_DYNTICK_CTRL_MASK);
+}
+
+/*
  * Return true if the snapshot returned from rcu_dynticks_snap()
  * indicates that RCU is in an extended quiescent state.
  */
@@ -799,8 +821,8 @@ static void rcu_eqs_enter_common(bool user)
 		do_nocb_deferred_wakeup(rdp);
 	}
 	rcu_prepare_for_idle();
-	rcu_preempt_deferred_qs(current);
 	__this_cpu_inc(disable_rcu_irq_enter);
+	rcu_dynticks_task_trace_enter();
 	rdtp->dynticks_nesting = 0; /* Breaks tracing momentarily. */
 	rcu_dynticks_eqs_enter(); /* After this, tracing works again. */
 	__this_cpu_dec(disable_rcu_irq_enter);
@@ -931,7 +953,7 @@ static void rcu_eqs_exit_common(long long oldval, int user)
 
 	rcu_dynticks_task_exit();
 	rcu_dynticks_eqs_exit();
-	rcu_cleanup_after_idle();
+	rcu_dynticks_task_trace_exit();
 	trace_rcu_dyntick(TPS("End"), oldval, rdtp->dynticks_nesting);
 	if (IS_ENABLED(CONFIG_RCU_EQS_DEBUG) &&
 	    !user && !is_idle_task(current)) {

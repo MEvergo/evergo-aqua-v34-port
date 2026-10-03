@@ -35,6 +35,7 @@
 #include <linux/delayed_call.h>
 #include <linux/uuid.h>
 #include <linux/errseq.h>
+#include <linux/ioprio.h>
 
 #include <asm/byteorder.h>
 #include <uapi/linux/fs.h>
@@ -61,6 +62,7 @@ struct fscrypt_info;
 struct fscrypt_operations;
 struct fsverity_info;
 struct fsverity_operations;
+struct filename;
 
 extern void __init inode_init(void);
 extern void __init inode_init_early(void);
@@ -158,6 +160,9 @@ typedef int (dio_iodone_t)(struct kiocb *iocb, loff_t offset,
 
 /* File is capable of returning -EAGAIN if I/O will block */
 #define FMODE_NOWAIT	((__force fmode_t)0x8000000)
+
+/* File supports asynchronous buffered reads via IOCB_WAITQ. */
+#define FMODE_BUF_RASYNC	((__force fmode_t)0x40000000)
 
 /*
  * Flag for rw_copy_check_uvector and compat_rw_copy_check_uvector
@@ -277,6 +282,8 @@ enum positive_aop_returns {
 struct page;
 struct address_space;
 struct writeback_control;
+struct wait_page_queue;
+
 
 /*
  * Write life time hint values.
@@ -298,17 +305,26 @@ enum rw_hint {
 #define IOCB_SYNC		(1 << 5)
 #define IOCB_WRITE		(1 << 6)
 #define IOCB_NOWAIT		(1 << 7)
+#define IOCB_WAITQ		(1 << 19)
+
 /* kiocb is a read or write operation submitted by fs/aio.c. */
 #define IOCB_AIO_RW		(1 << 23)
 
 struct kiocb {
 	struct file		*ki_filp;
+	randomized_struct_fields_start
 	loff_t			ki_pos;
 	void (*ki_complete)(struct kiocb *iocb, long ret, long ret2);
 	void			*private;
 	int			ki_flags;
-	enum rw_hint		ki_hint;
-} __randomize_layout;
+	u16			ki_hint;
+	u16			ki_ioprio; /* See linux/ioprio.h */
+	union {
+		unsigned int		ki_cookie;
+		struct wait_page_queue	*ki_waitq;
+	};
+	randomized_struct_fields_end
+};
 
 static inline bool is_sync_kiocb(struct kiocb *kiocb)
 {
@@ -1626,6 +1642,33 @@ static inline void sb_start_intwrite(struct super_block *sb)
 	__sb_start_write(sb, SB_FREEZE_FS, true);
 }
 
+/**
+ * kiocb_start_write - get write access to a superblock for async file I/O
+ * @iocb: the I/O context being submitted
+ *
+ * The submitting task will not retain this freeze protection after returning
+ * to userspace, so transfer the lockdep annotation to the completion context.
+ */
+static inline void kiocb_start_write(struct kiocb *iocb)
+{
+	struct inode *inode = file_inode(iocb->ki_filp);
+
+	sb_start_write(inode->i_sb);
+	__sb_writers_release(inode->i_sb, SB_FREEZE_WRITE);
+}
+
+/**
+ * kiocb_end_write - drop write access after asynchronous file I/O
+ * @iocb: the I/O context whose write access is being released
+ */
+static inline void kiocb_end_write(struct kiocb *iocb)
+{
+	struct inode *inode = file_inode(iocb->ki_filp);
+
+	__sb_writers_acquired(inode->i_sb, SB_FREEZE_WRITE);
+	sb_end_write(inode->i_sb);
+}
+
 
 extern bool inode_owner_or_capable(const struct inode *inode);
 
@@ -1637,6 +1680,21 @@ extern int vfs_create2(struct vfsmount *, struct inode *, struct dentry *, umode
 extern int vfs_mkdir(struct inode *, struct dentry *, umode_t);
 extern int vfs_mkdir2(struct vfsmount *, struct inode *, struct dentry *, umode_t);
 extern int vfs_mknod(struct inode *, struct dentry *, umode_t, dev_t);
+extern int do_renameat2(int olddfd, struct filename *from, int newdfd,
+			struct filename *to, unsigned int flags);
+extern long do_rmdir(int dfd, struct filename *name);
+extern long do_unlinkat(int dfd, struct filename *name);
+extern int do_statx(int dfd, const char __user *filename,
+		    unsigned int flags, unsigned int mask,
+		    struct statx __user *buffer);
+extern long do_splice(struct file *in, loff_t *off_in, struct file *out,
+		      loff_t *off_out, size_t len, unsigned int flags);
+extern long do_tee(struct file *in, struct file *out, size_t len,
+		   unsigned int flags);
+extern int sync_file_range(struct file *file, loff_t offset, loff_t nbytes,
+			   unsigned int flags);
+extern int vfs_fadvise(struct file *file, loff_t offset, loff_t len,
+		       int advice);
 extern int vfs_mknod2(struct vfsmount *, struct inode *, struct dentry *, umode_t, dev_t);
 extern int vfs_symlink(struct inode *, struct dentry *, const char *);
 extern int vfs_symlink2(struct vfsmount *, struct inode *, struct dentry *, const char *);
@@ -1745,6 +1803,7 @@ struct file_operations {
 	ssize_t (*write) (struct file *, const char __user *, size_t, loff_t *);
 	ssize_t (*read_iter) (struct kiocb *, struct iov_iter *);
 	ssize_t (*write_iter) (struct kiocb *, struct iov_iter *);
+	int (*iopoll)(struct kiocb *kiocb, bool spin);
 	int (*iterate) (struct file *, struct dir_context *);
 	int (*iterate_shared) (struct file *, struct dir_context *);
 	unsigned int (*poll) (struct file *, struct poll_table_struct *);
@@ -1776,6 +1835,7 @@ struct file_operations {
 			u64);
 	ssize_t (*dedupe_file_range)(struct file *, u64, u64, struct file *,
 			u64);
+	int (*fadvise)(struct file *, loff_t, loff_t, int);
 } __randomize_layout;
 
 struct inode_operations {
@@ -1976,12 +2036,20 @@ static inline enum rw_hint file_write_hint(struct file *file)
 
 static inline int iocb_flags(struct file *file);
 
+static inline u16 ki_hint_validate(enum rw_hint hint)
+{
+	typeof(((struct kiocb *)0)->ki_hint) max_hint = -1;
+
+	return hint <= max_hint ? hint : WRITE_LIFE_NOT_SET;
+}
+
 static inline void init_sync_kiocb(struct kiocb *kiocb, struct file *filp)
 {
 	*kiocb = (struct kiocb) {
 		.ki_filp = filp,
 		.ki_flags = iocb_flags(filp),
-		.ki_hint = file_write_hint(filp),
+		.ki_hint = ki_hint_validate(file_write_hint(filp)),
+		.ki_ioprio = get_current_ioprio(),
 	};
 }
 
@@ -3048,6 +3116,7 @@ ssize_t __blockdev_direct_IO(struct kiocb *iocb, struct inode *inode,
 			     get_block_t get_block,
 			     dio_iodone_t end_io, dio_submit_t submit_io,
 			     int flags);
+int blockdev_direct_IO_iopoll(struct kiocb *iocb, bool spin);
 
 static inline ssize_t blockdev_direct_IO(struct kiocb *iocb,
 					 struct inode *inode,

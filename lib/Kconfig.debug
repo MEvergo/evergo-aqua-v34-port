@@ -193,8 +193,9 @@ config DEBUG_INFO_BTF
 	depends on DEBUG_INFO
 	help
 	  Generate deduplicated BTF type information from DWARF debug info.
-	  Turning this on expects presence of pahole tool, which will convert
-	  DWARF type info into equivalent deduplicated BTF type info.
+	  Turning this on expects pahole v1.32 or newer. The kernel BTF parser
+	  supports function prototypes and data sections, but not ENUM64,
+	  DECL_TAG, or TYPE_TAG; the link script omits those optional encodings.
 
 config GDB_SCRIPTS
 	bool "Provide GDB scripts for kernel debugging"

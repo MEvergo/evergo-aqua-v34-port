@@ -188,12 +188,28 @@ static const __u32 SUKISU_KPM_LIST = 4;
 static const __u32 SUKISU_KPM_INFO = 5;
 static const __u32 SUKISU_KPM_CONTROL = 6;
 static const __u32 SUKISU_KPM_VERSION = 7;
+static const __u32 SUKISU_KPM_CONTROL_EX = 8;
+static const __u32 SUKISU_KPM_CONTROL1 = 9;
 
 struct ksu_kpm_cmd {
     __aligned_u64 __user control_code;
     __aligned_u64 __user arg1;
     __aligned_u64 __user arg2;
     __aligned_u64 __user result_code;
+};
+struct ksu_kpm_control_ex_cmd {
+    __aligned_u64 __user name;
+    __aligned_u64 __user args;
+    __aligned_u64 __user out_msg;
+    __u32 outlen;
+    __u32 reserved;
+};
+
+struct ksu_kpm_control1_cmd {
+    __aligned_u64 __user name;
+    __aligned_u64 arg1;
+    __aligned_u64 arg2;
+    __aligned_u64 arg3;
 };
 
 /* IOCTL command definitions */
