@@ -54,7 +54,7 @@ ARM64 native 使用 generic syscall 表，ARM64 compat 使用 ARM32 表。两者
 - 新路径省去 `-pg`、`recordmcount` 与 `BUILD_C_RECORDMCOUNT`；不支持 patchable entry 的编译器保留既有 `-pg` 路径。`notrace` 使用显式零个 patchable entries 的属性。
 - BTF 构建要求 `pahole >= 1.32`。生成时跳过 `ENUM64`、`DECL_TAG` 与 `TYPE_TAG`，因为本树 BTF parser 只支持到 `DATASEC`；没有开启 float BTF 编码。不能把无法解析的宿主新类型编码直接塞进旧内核。
 - `DEBUG_FS=n` 不等于 function tracing 不可用；本树 `CONFIG_TRACING` 构建独立 `tracefs`。验证消费者挂载 `tracefs`，不依赖替开启 debugfs 来掩盖配置错误。
-- 目标构建入口仍为 `bash build.sh`，固定 ZyC clang/LLD `22.0.0`，复用已有 `out/.config` 并构建 `vmlinux Image.gz dtbs`。此前 VFS 修复后的构建记录见下文；本轮源码构建结果单独记录。
+- 目标构建入口为 `bash build.sh`，使用 ZyC clang/LLD `22.0.0`，复用已有 `out/.config` 并构建 `vmlinux Image.gz dtbs modules`。bpfilter helper 单独使用 `BPFILTER_CC` / `BPFILTER_LDFLAGS`；脚本优先寻找 AArch64 GCC，默认静态链接，避免 Android 上依赖不存在的 glibc 动态解释器。缺少目标 libc 的工具链会明确报错，不再静默跳过 bpfilter。
 
 ## 行为与生命周期适配
 
@@ -167,10 +167,17 @@ Blockdev 的 `IOCB_NOWAIT` 独立于 `IOCB_HIPRI` 设置 `REQ_NOWAIT`。XFS NOWA
 | `include/linux/lsm_hook_defs.h`, `include/linux/lsm_hooks.h`, `include/linux/security.h`, `security/security.c`, `fs/super.c`, `fs/namespace.c` | shared blob accounting/alignment、sb_delete/move_mounthooks及VFS调用 | 与既有 LSM 共存并正确回收。 |
 | `security/selinux/include/objsec.h`, `security/selinux/hooks.c`, `security/selinux/ss/services.c`, `security/smack/smack.h`, `security/smack/smack_lsm.c` | 原 major LSM对象改用各自blob offset | 不禁用SELinux/Smack，不遗留旧独占free所有权。 |
 | `docs/custom-kernel-interfaces.md`, `docs/standard-kernel-backports.md` | 接口契约、完整变更登记、来源/ABI与验证边界 | 自定义内核差异有明确维护入口；不改 `docs/superpowers/`。 |
+| `arch/arm64/configs/everpal_defconfig`, `out/.config`, `kernel/usermode_driver.c`, `kernel/params.c`, `fs/nomount.c`, `Makefile`, `net/Makefile`, `net/bpfilter/Makefile`, `build.sh` | 启用 FAULT_INJECTION/BPFILTER；补齐 usermode driver 声明及 const 初始化；修正工具链探测、目标 helper 编译与模块构建入口 | `BPFILTER_UMH=m`；helper 使用目标 libc 静态链接，链接失败显式终止。保留 STATIC_USERMODEHELPER 安全路由。 |
+| `scripts/Makefile.modpost` | ThinLTO 模块在 `HAVE_PATCHABLE_FUNCTION_ENTRY=y` 时跳过旧 `recordmcount` 步骤，与 vmlinux 链接规则一致 | 干净输出目录不再依赖遗留的 `scripts/recordmcount` 可执行文件；非 patchable-entry 路径保持原行为。 |
+| `kernel/bpf/verifier.c`, `tools/bpf/resolve_btfids/main.c` | 按实际 error-injection 白名单与配置生成 BTF set；区分零成员集合和未解析普通 ID | 不为不存在的函数写入伪 ID；合法空集合不再误报警，真正缺失的类型仍报警。 |
+| `include/linux/perf_event.h`, `kernel/events/internal.h`, `kernel/events/core.c`, `kernel/events/ring_buffer.c` | perf 内部 `struct ring_buffer` 更名为 `struct perf_buffer` | 消除与 tracing ring buffer 的异构同名 BTF 冲突；布局、字段及用户 ABI 不变。 |
+| `lib/lz4/lz4.c`, `lib/lz4/lz4.h`, `lib/lz4/lz4hc.c`, `lib/lz4/lz4hc.h`, `crypto/lz4hc.c` | kernel/freestanding 不提供隐含大栈 workspace 的普通 wrapper；HC optimal table 移入调用者 workspace；crypto 调用者改用现有 `LZ4HC_CLEVEL_DEFAULT` | HC workspace 增至 327,784 bytes；调用者必须用 `LZ4HC_MEM_COMPRESS` 或 `LZ4_sizeofStateHC()` 分配，不能硬编码旧大小。保留压缩等级、流式及字典语义。 |
+| `drivers/kernelsu/kpm/kpm.c`, `drivers/kernelsu/kpm/compat.c` | user-load 路径缓冲区改为动态分配；小批次 hotpatch 使用有界栈 workspace，大批次一次分配 | 保留复制边界、锁与回滚顺序；分配失败返回 `-ENOMEM`。nosync 不新增 workspace 睡眠分配。 |
+| `drivers/misc/mediatek/connectivity/wlan/core/gen4m/common/wlan_lib.c` | 对统计循环局部禁止 Clang 展开 | 保持统计内容和遍历次序，避免展开使调用者栈帧膨胀。 |
 
 ## 已执行的验证与限制
 
-以下第 1–8 项是此前完成的基线验证，早于本轮代码修改，不覆盖本轮新增行为；本轮构建、对象编译与 QEMU 限制见第 9–10 项。
+以下第 1–8 项是此前完成的基线验证，早于后续代码修改，不覆盖新增行为。第 9 项起按执行先后记录后续构建与修复；最新条目覆盖此前已修复的问题，第 10 项的 QEMU 成功推断已撤回。
 
 1. 在真实 ARM64 QEMU `virt` / Cortex-A57 / 2 CPU 的旧行为上复现两个错误：跨粒度 watchpoint 被接受，以及 legacy KEY/ABS 在物理 SYN 后丢失。消费者返回具体失败 stage，不用源文本检查代替行为。
 2. 实际 Kconfig 生成确认 `HAVE_PATCHABLE_FUNCTION_ENTRY`、`IO_URING` / `IO_WQ`、Landlock、BPF events、BTF 等选择；THP 消费者配置使用 4 KiB 页、真实 THP、COMPACTION/MIGRATION 与 proc page monitor。最终 THP 场景使用 1 GiB guest RAM：现有 4.14 `hugepage_init()` 在可用总页不足 512 MiB 时自动禁用 THP，512 MiB guest 扣除保留页后会触发此真实策略；没有为测试修改生产策略。
@@ -181,7 +188,39 @@ Blockdev 的 `IOCB_NOWAIT` 独立于 `IOCB_HIPRI` 设置 `REQ_NOWAIT`。XFS NOWA
 7. 当时的 `bash build.sh` 重新编译 `fs/namei.o`，完成 LTO/MODPOST、BTF/BTFIDS、vmlinux/Image/Image.gz 与 dtbs 目标，入口返回成功。`gzip -t` 验证最终镜像完整性；production ELF 包含真实 `.BTF` / `.BTF_ids`，`System.map` 包含六个标准 syscall、BTF 边界和 ftrace 表边界。宿主 `bpftool` 完整解析最终 BTF 的 133,602 个 types，kind 仅到 `DATASEC`，无新增不受支持的 kind。
 8. 当时构建日志仍有 `resolve_btfids` 的同名重复 type ID 告警，以及 `should_failslab`、`should_fail_alloc_page`、`__add_to_page_cache_locked` 未解析告警；GNU `elfedit` probe 与 bpfilter 宿主 executable probe 也有诊断。它们没有阻断当时构建；没有通过隐藏日志或跳过 BTFIDS 把告警伪装为消失。上述 QEMU 结果证明已列明的 tracing/BPF 路径，不宣称这些未解析函数也可附着。
 9. 本轮以既有产品配置 `out/.config` 和 ZyC clang/LLD 22.0.0、`-j2` 完成 `vmlinux`、`Image.gz`、`dtbs` 目标构建；`out/vmlinux` 为 AArch64 ELF，`gzip -t out/arch/arm64/boot/Image.gz` 通过。BPF JIT/syscall/trampoline、RCU tree、frame_vector 与 input overlay 对象均在本轮重编译；其中 `frame_vector_create()` 现将 `got_ref` 和 `is_pfns` 初始化为 `false`。产品配置关闭 `CONFIG_HUGETLBFS`，因此另用隔离配置启用 `HUGETLBFS` 并成功编译 `mm/hugetlb.o`；产品配置未启用 READ_MB，另在隔离配置启用 `RCU_EXPERT` / `CONFIG_TASKS_TRACE_RCU_READ_MB` 后成功编译 `kernel/rcu/tree.o`。BTFIDs 仍输出重复类型 ID 和未解析符号告警；`aarch64-linux-gnu-elfedit` 缺失和 bpfilter host-link probe skipped 诊断也未阻断构建。
-10. 本轮在 `/tmp` 临时解包 QEMU 11.1.1 及运行依赖。产品配置未启用 PL011、devtmpfs 或 virtio console，故此前通过串口 marker 观察启动的尝试未能捕获输出。随后改用无控制台 one-shot initramfs loader，在当前 `Image` 中加载临时 ARM64 `frame_vector` 模块：模块检查新建 vector 的两个 flags 为 `false`，并验证 `get_vaddr_frames(0, 1, FOLL_FORCE, vec)` 返回 `-EFAULT` 后可完成 `put_vaddr_frames()`/destroy；loader 仅在 `init_module()` 成功后请求 guest poweroff，QEMU 在 30 秒 timeout 前以 `qemu_rc=0` 退出。先前的预修复 kmalloc poison 试验也未触发旧态，因此这里只记录当前路径 smoke，不宣称已建立 RED/GREEN 回归。此前集成 smoke 消费者/harness 已移除，本轮未运行完整历史 QEMU suite。
+10. 此前使用 QEMU 11.1.1、产品 `Image` 和临时 `frame_vector` 模块，检查两个初始化 flags 及失败后的清理路径；但当时只观察到 `qemu_rc=0`，没有捕获模块 PASS marker 或 guest poweroff 事件。后续 QMP 复核证明，产品内核在 MTK 初始化中 panic 后产生的 `guest-reset` 同样能让带 `-no-reboot` 的 QEMU 以 0 退出。因此撤回该次 `frame_vector` runtime smoke 成功的推断：不能确认 `/init` 或模块曾执行，也没有建立 RED/GREEN 回归。运行成功必须同时具备测试路径的明确 PASS 证据和预期 guest shutdown，不能只检查宿主退出码。
+11. 本轮配置确认 `CONFIG_BPFILTER=y`、`CONFIG_BPFILTER_UMH=m`、`CONFIG_USERMODE_DRIVER=y`、`CONFIG_FAULT_INJECTION=y`；`CONFIG_FAILSLAB`、`CONFIG_FAIL_PAGE_ALLOC` 未启用，`CONFIG_DEBUG_FS` 未启用因而 `FAULT_INJECTION_DEBUG_FS` 不会生效，ARM64 也未提供 `HAVE_FUNCTION_ERROR_INJECTION`，所以打开的是 fault-injection 框架，不代表已启用实际 slab/page/function 注入器。BPFILTER 选择 `USERMODE_DRIVER` 后暴露 `task_tgid()` 缺声明，补 `linux/sched/signal.h` 后对象编译通过。
+    `CC_CAN_LINK` 已改为运行 `scripts/cc-can-link.sh` 并传入目标 Clang flags；独立探针显示宿主 Clang 可链接、AArch64 目标探针失败。该构建启动时 `aarch64-linux-gnu-elfedit` 尚未安装，Kbuild 因而推导出错误的 `/` 工具链根；安装 binutils 后 elfedit 位于 `/usr/bin`，但复测仍因缺少 AArch64 GCC/libc sysroot 而读到宿主 `/usr/include/stdio.h` 并在 `__float128` 处失败。`build.sh` 只构建 `vmlinux Image.gz dtbs`，而 UMH 配置仍为 `m`，故本轮没有构建/验证 bpfilter 模块或其运行时功能。
+    最终 `vmlinux` BTFIDs 仍告警重复的 `path`、`file`、`task_struct`、`seq_file` 类型及未解析的 `should_failslab`、`should_fail_alloc_page`、`__add_to_page_cache_locked`；`resolve_btfids` 对重复名字保留首个 ID，对未解析项写入 0 并继续链接。前两个未解析项分别受 `CONFIG_FAILSLAB`、`CONFIG_FAIL_PAGE_ALLOC` 关闭影响；第三项的具体消失阶段未确认，抽查的重复类型布局相同但未穷尽比较。
+    最终 ELF 反汇编显示 ARM64 4 KiB 页、KASAN 关闭时线程栈为 16 KiB；`LZ4_compress_fast` 和 `LZ4_compress_destSize` 各自保留 16,464-byte 栈帧（freestanding LZ4 在栈上分配 stream），超过单线程栈，但未找到它们的 in-tree 调用者，故记为潜在风险而非已复现故障。`wlanDumpAllBssStatistics` 为 3,648 bytes，位于 TX 统计超时触发的路径；KPM `kpm_dispatch` 为 5,264 bytes，包含 user-load 路径缓冲区，均是可达路径的栈压力告警，未证明实际栈溢出。`kernel/params.c` 的临时 `kernel_param` 与 `fs/nomount.c` 的 const actor 初始化告警已修复并做对象编译验证。
+12. 后续修复与已运行的专项验证：
+    - bpfilter 工具链正例产出静态 AArch64 helper 与 `bpfilter.ko`；`BPFILTER_CC=false` 负例明确报错。`HOSTLDFLAGS` 命令行覆盖曾吞掉 `-static`，修复后同一场景仍产生无动态解释器的目标 ELF。用 QEMU user-mode / Cortex-A57 执行真实目标 helper，验证 get(0) 返回 0、get(1) 与 set(0) 返回 `-ENOPROTOOPT`，关闭请求管道后正常退出；这不是内核模块或 Android forwarder 策略的运行证明，也不表示实验性 bpfilter 已实现完整防火墙。
+    - verifier 的两个 fault-injection BTF ID 现在同时受函数白名单能力与各自配置约束；本树 `__add_to_page_cache_locked` 没有对应白名单项，最终 ELF 也没有可解析的独立 FUNC，因此移除该项。真实 ELF fixture 证明 resolver 修复前把合法空 set 误报为 unresolved，修复后空集合写入 count=0、单成员与乱序多成员集合正确写入/排序，而真正缺失的普通类型仍保留告警。
+    - 首轮整合 ELF 的 BTF 图验证 `perf_event.rb` 与 `perf_output_handle.rb` 指向 `perf_buffer`，`trace_buffer.buffer` 指向 tracing `ring_buffer`，两者保留不同布局。剩余 `seq_file`、`file`、`path`、`task_struct` 重名变体递归比较未发现不同 aggregate 布局，差异归结于 `bool` typedef 与直接 `_Bool` 的等价表示；没有强行合并或隐藏这些诊断。
+    - 宿主直接编译实际 LZ4 源码，完成 extState roundtrip 与 destSize 部分消费验证。HC 的 ASan fixture 覆盖等级 2/9/10/11/12、1–8,192-byte 输入、workspace 大小边界、destSize、流式与超过 4 KiB 的 attached dictionary 路径，逐字节校验解压结果，全部通过。destSize=1 合法地产生不消费输入的空块，不将其误判为压缩故障。
+
+13. 用户允许测试插桩后，独立 `ARCH_VEXPRESS` 配置在 QEMU `virt` / Cortex-A57 / 2 CPU / 1 GiB RAM 中完成核心 smoke；产品配置与产品源码未加入测试桩，也未继续使用 initcall blacklist：
+    - 测试镜像关闭 MTK 硬件路径，保留 KSU/KPM、BPFILTER、perf/tracing、LZ4/LZ4HC、crypto、ThinLTO、BTF、4 KiB 页与 VMAP_STACK。仅补齐两个未启用的 vendor 调度依赖：fork ramp 返回源码默认值 0；uclamp 钩子若被调用立即 panic，避免用空实现掩盖依赖。另在测试镜像的核心 text 中放置专用指令靶点，满足 hotpatch 原有地址范围约束，没有放宽生产验证。
+    - KPM 用户接口验证 NULL/无效路径、PATH_MAX 边界、1023/1024-byte 参数边界及可选 NULL 参数。hotpatch 验证 4 项与 64 项成功写入、逐项读回、执行与恢复；65 项、64 项重复地址、部分准备后失败及 nosync 非法参数按契约拒绝。第二项 expected 不匹配触发 `-EBUSY`，第一项已经写入的内容被实际回滚；nosync 合法写入与恢复也通过。
+    - 仅执行拒绝/回滚场景的模块实例可以卸载；成功 raw hotpatch 后即使恢复原指令，模块仍因 `ever_patched` 安全标记拒绝卸载并返回 `-EBUSY`。测试保留该策略，未为了通过测试清除 pin。没有覆盖 `-EUCLEAN` 修复分支或 slab/page 分配故障注入。
+    - perf mmap ring 在该次执行中读取 100 个有效 IP samples / 1,600 bytes；tracing ring 验证真实 payload 写入/消费及空队列。普通 LZ4 完成 roundtrip/容量边界，HC 等级 9–12 的 roundtrip 通过，其中 10–12 覆盖实际 optimal-workspace 路径；crypto LZ4HC 完成压缩/解压及不足输出容量的错误路径。
+    - 实际加载 `bpfilter.ko` 并启动嵌入 helper，通过真实管道协议验证健康检查和不支持的命令。保留 `STATIC_USERMODEHELPER=y` 与 `/system_ext/bin/aee_core_forwarder` 路径，测试 rootfs 提供按 argv/cwd 契约执行的 forwarder；这不等于已验证实体 Android forwarder 的策略。
+    - 最终同时观察到各项 PASS、`KERNEL_FIXES_SMOKE PASS`、两个用户消费者 wait status=0、smoke 模块加载返回 0，以及 QMP `guest-shutdown`。独立干净输出目录还复现并修复 ThinLTO 模块误调用不存在的 `recordmcount`；bpfilter 与 smoke 模块随后均链接并实际加载成功。
+
+14. 最终使用原产品 `out/.config`、ZyC clang/LLD 22.0.0、AArch64 GCC 静态 helper 和 `make -j4` 完成 `vmlinux Image.gz dtbs modules` 目标。BTF 编码的前次运行超过命令时限；最终通过临时 PAHOLE wrapper 使用 `--jobs=4` 完成，没有关闭 BTF 或跳过 BTFIDS。
+    - `gzip -t out/arch/arm64/boot/Image.gz` 通过；`out/vmlinux`、`out/net/bpfilter/bpfilter.ko` 均为 AArch64 ELF，helper 为静态 AArch64 ELF。
+    - 最终 BTF 全量解析及 perf/tracing 引用检查通过；不再出现上述三个函数或空集合的 unresolved 告警。`seq_file`、`file`、`path`、`task_struct` 仍有第 12 项所述的重名变体诊断，没有将其屏蔽。
+    - 最终 ELF 反汇编得到以下栈帧大小，单位 bytes；没有提高 FRAME_WARN 或扩大线程栈：
+
+    | 函数 | 修复前 | 修复后 |
+    | --- | ---: | ---: |
+    | `LZ4HC_compress_optimal` | 66,032 | 416 |
+    | `kpm_dispatch` | 5,264 | 1,200 |
+    | `kpm_compat_hotpatch` | 3,728 | 384 |
+    | `kpm_compat_hotpatch_nosync` | 3,696 | 160 |
+    | `wlanDumpAllBssStatistics` | 3,648 | 144 |
+
+    完整 ELF 符号表确认两个各占 16,464-byte 栈帧的普通 LZ4 wrapper 不再出现在内核，也没有隔离测试的 `stack_smoke_patch_target`。WLAN 只做了编译与最终机器码验证，未宣称实体 WLAN 运行通过。
 
 此前 QEMU 成功记录只覆盖当时临时消费者实际执行的场景；目标产品配置关闭 `CONFIG_TRANSPARENT_HUGEPAGE`，因此 THP 由独立启用 THP 的 1 GiB guest 验证。NVMe/block/ext4/XFS 均使用 QEMU 提供的真实内核驱动和文件系统路径，不代表实体 UFS/eMMC/DMA 行为。
 

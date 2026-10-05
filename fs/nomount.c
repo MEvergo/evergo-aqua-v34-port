@@ -3126,7 +3126,12 @@ static NM_ACTOR_RET nm_sub_actor(struct dir_context *ctx, const char *name,
 static void nm_sub_collect(const char *dirpath, struct nm_ino_pop *pop,
                            char (*names)[NAME_MAX + 1])
 {
-    struct nm_sub_scan sc;
+    struct nm_sub_scan sc = {
+        .ctx = {
+            .actor = nm_sub_actor,
+        },
+        .names = names,
+    };
     struct path dp;
     struct file *dir;
     int i;
@@ -3135,9 +3140,6 @@ static void nm_sub_collect(const char *dirpath, struct nm_ino_pop *pop,
         return;
     if (kern_path(dirpath, LOOKUP_FOLLOW, &dp) != 0)
         return;
-    memset(&sc, 0, sizeof(sc));
-    sc.names = names;
-    *((filldir_t *)&sc.ctx.actor) = nm_sub_actor;
     dir = nm_open_dir(&dp, NULL);
     path_put(&dp);
     if (!IS_ERR(dir)) {

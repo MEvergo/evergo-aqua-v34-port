@@ -12223,12 +12223,20 @@ static int check_sleepable_lsm_hook(u32 btf_id)
  * ALLOW_ERROR_INJECTION list
  */
 BTF_SET_START(btf_non_sleepable_error_inject)
-/* Three functions below can be called from sleepable and non-sleepable context.
- * Assume non-sleepable from bpf safety point of view.
+/*
+ * These helpers can run in sleepable and non-sleepable contexts. Their IDs
+ * matter only when error injection is supported, and each helper is emitted
+ * only when its corresponding fault-injection option is enabled.
+ * __add_to_page_cache_locked is not on the ALLOW_ERROR_INJECTION whitelist.
  */
-BTF_ID(func, __add_to_page_cache_locked)
+#ifdef CONFIG_FUNCTION_ERROR_INJECTION
+#ifdef CONFIG_FAIL_PAGE_ALLOC
 BTF_ID(func, should_fail_alloc_page)
+#endif
+#ifdef CONFIG_FAILSLAB
 BTF_ID(func, should_failslab)
+#endif
+#endif
 BTF_SET_END(btf_non_sleepable_error_inject)
 
 static int check_non_sleepable_error_inject(u32 btf_id)

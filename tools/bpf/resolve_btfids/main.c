@@ -549,13 +549,14 @@ out:
 	return err;
 }
 
-static int id_patch(struct object *obj, struct btf_id *id)
+static int id_patch(struct object *obj, struct btf_id *id, bool is_set)
 {
 	Elf_Data *data = obj->efile.idlist;
 	int *ptr = data->d_buf;
 	int i;
 
-	if (!id->id) {
+	/* A zero-count set is valid and is stored in id->cnt. */
+	if (!is_set && !id->id) {
 		pr_err("WARN: resolve_btfids: unresolved symbol %s\n", id->name);
 	}
 
@@ -579,7 +580,8 @@ static int id_patch(struct object *obj, struct btf_id *id)
 	return 0;
 }
 
-static int __symbols_patch(struct object *obj, struct rb_root *root)
+static int __symbols_patch(struct object *obj, struct rb_root *root,
+			   bool is_set)
 {
 	struct rb_node *next;
 	struct btf_id *id;
@@ -588,7 +590,7 @@ static int __symbols_patch(struct object *obj, struct rb_root *root)
 	while (next) {
 		id = rb_entry(next, struct btf_id, rb_node);
 
-		if (id_patch(obj, id))
+		if (id_patch(obj, id, is_set))
 			return -1;
 
 		next = rb_next(next);
@@ -645,11 +647,11 @@ static int symbols_patch(struct object *obj)
 {
 	off_t err;
 
-	if (__symbols_patch(obj, &obj->structs)  ||
-	    __symbols_patch(obj, &obj->unions)   ||
-	    __symbols_patch(obj, &obj->typedefs) ||
-	    __symbols_patch(obj, &obj->funcs)    ||
-	    __symbols_patch(obj, &obj->sets))
+	if (__symbols_patch(obj, &obj->structs, false)  ||
+	    __symbols_patch(obj, &obj->unions, false)   ||
+	    __symbols_patch(obj, &obj->typedefs, false) ||
+	    __symbols_patch(obj, &obj->funcs, false)    ||
+	    __symbols_patch(obj, &obj->sets, true))
 		return -1;
 
 	if (sets_patch(obj))

@@ -54,6 +54,8 @@ extern "C" {
 /*! LZ4_compress_HC() :
  *  Compress data from `src` into `dst`, using the powerful but slower "HC" algorithm.
  * `dst` must be already allocated.
+ * `wrkmem` must be at least `LZ4_sizeofStateHC()` bytes and aligned on
+ * 8-byte boundaries.
  *  Compression is guaranteed to succeed if `dstCapacity >= LZ4_compressBound(srcSize)` (see "lz4.h")
  *  Max supported `srcSize` value is LZ4_MAX_INPUT_SIZE (see "lz4.h")
  * `compressionLevel` : any value between 1 and LZ4HC_CLEVEL_MAX will work.
@@ -86,6 +88,8 @@ LZ4LIB_API int LZ4_compress_HC_extStateHC(void *stateHC, const char *src,
  * @return : the number of bytes written into 'dst' (necessarily <= targetDstSize)
  *           or 0 if compression fails.
  * `srcSizePtr` : on success, *srcSizePtr is updated to indicate how much bytes were read from `src`
+ * `stateHC` must provide at least `LZ4_sizeofStateHC()` bytes, aligned on
+ * 8-byte boundaries.
  */
 LZ4LIB_API int LZ4_compress_HC_destSize(void *stateHC, const char *src,
 					char *dst, int *srcSizePtr,
@@ -231,6 +235,16 @@ LZ4_attach_HC_dictionary(LZ4_streamHC_t *working_stream,
  * Declare or allocate an LZ4_streamHC_t instead.
 **/
 typedef struct LZ4HC_CCtx_internal LZ4HC_CCtx_internal;
+
+#define LZ4HC_OPT_NUM (1 << 12)
+#define LZ4HC_OPT_TRAILING_LITERALS 3
+typedef struct {
+	int price;
+	int off;
+	int mlen;
+	int litlen;
+} LZ4HC_optimal_t;
+
 struct LZ4HC_CCtx_internal {
 	LZ4_u32 hashTable[LZ4HC_HASHTABLESIZE];
 	LZ4_u16 chainTable[LZ4HC_MAXD];
@@ -245,10 +259,15 @@ struct LZ4HC_CCtx_internal {
                                 otherwise, favor compression ratio */
 	LZ4_i8 dirty; /* stream has to be fully reset if this flag is set */
 	const LZ4HC_CCtx_internal *dictCtx;
+	/* Caller-owned workspace for the optimal parser (not persistent state). */
+	LZ4HC_optimal_t
+		optimalTable[LZ4HC_OPT_NUM + LZ4HC_OPT_TRAILING_LITERALS];
 };
 
-#define LZ4_STREAMHC_MINSIZE                                                   \
-	262200 /* static size, for inter-version compatibility */
+/* Preserve the old stream reserve and add optimal-parser workspace. */
+#define LZ4_STREAMHC_MINSIZE \
+	(262200 + sizeof(LZ4HC_optimal_t) * \
+		 (LZ4HC_OPT_NUM + LZ4HC_OPT_TRAILING_LITERALS))
 union LZ4_streamHC_u {
 	char minStateSize[LZ4_STREAMHC_MINSIZE];
 	LZ4HC_CCtx_internal internal_donotuse;

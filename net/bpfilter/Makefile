@@ -6,13 +6,20 @@
 hostprogs-y := bpfilter_umh
 bpfilter_umh-objs := main.o
 HOSTCFLAGS += -I. -Itools/include/ -Itools/include/uapi
-HOSTCC := $(CC)
+override HOSTCC = $(BPFILTER_CC)
+override HOSTLDFLAGS += $(BPFILTER_LDFLAGS)
 
 ifeq ($(CONFIG_BPFILTER_UMH), y)
 # builtin bpfilter_umh should be compiled with -static
 # since rootfs isn't mounted at the time of __init
 # function is called and do_execv won't find elf interpreter
-HOSTLDFLAGS += -static
+override HOSTLDFLAGS += -static
+endif
+
+ifneq ($(CONFIG_BPFILTER_UMH),)
+ifeq ($(shell $(CONFIG_SHELL) $(srctree)/scripts/cc-can-link.sh $(HOSTCC) $(HOSTLDFLAGS)),)
+$(error Cannot link the target bpfilter helper; set BPFILTER_CC and BPFILTER_LDFLAGS for a toolchain with target libc)
+endif
 endif
 
 $(obj)/bpfilter_umh_blob.o: $(obj)/bpfilter_umh

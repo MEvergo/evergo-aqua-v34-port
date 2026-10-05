@@ -1711,6 +1711,7 @@ int LZ4_compress_fast_extState_fastReset(void *state, const char *src,
 	}
 }
 
+#if !defined(__KERNEL__) && !LZ4_FREESTANDING
 int LZ4_compress_fast(const char *src, char *dest, int srcSize, int dstCapacity,
 		      int acceleration)
 {
@@ -1732,6 +1733,7 @@ int LZ4_compress_fast(const char *src, char *dest, int srcSize, int dstCapacity,
 #endif
 	return result;
 }
+#endif
 
 int LZ4_compress_default(const char *src, char *dst, int srcSize,
 			 int dstCapacity, void *wrkmem)
@@ -1794,6 +1796,7 @@ int LZ4_compress_destSize_extState(void *state, const char *src, char *dst,
 	return r;
 }
 
+#if !defined(__KERNEL__) && !LZ4_FREESTANDING
 int LZ4_compress_destSize(const char *src, char *dst, int *srcSizePtr,
 			  int targetDstSize)
 {
@@ -1815,6 +1818,7 @@ int LZ4_compress_destSize(const char *src, char *dst, int *srcSizePtr,
 #endif
 	return result;
 }
+#endif
 
 /*-******************************
 *  Streaming functions

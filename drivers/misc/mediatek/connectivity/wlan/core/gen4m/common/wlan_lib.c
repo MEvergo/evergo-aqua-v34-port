@@ -6171,6 +6171,13 @@ void wlanDumpBssStatistics(IN struct ADAPTER *prAdapter,
 			prBssInfo->arLinkStatistics[eAci].u4TxRetryMsdu;
 	}
 
+	/*
+	 * Keep the fixed-size loop from unrolling into per-station pointers
+	 * spilled in the inlined caller's frame at -O3.
+	 */
+#ifdef __clang__
+#pragma clang loop unroll(disable)
+#endif
 	for (ucIdx = 0; ucIdx < CFG_STA_REC_NUM; ucIdx++) {
 		prStaRec = cnmGetStaRecByIndex(prAdapter, ucIdx);
 		if (!prStaRec)

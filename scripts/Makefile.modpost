@@ -144,7 +144,9 @@ ifdef CONFIG_LTO_CLANG
 		 $(filter-out FORCE,$(^:$(modpost-ext).o=.o))
 
   ifdef CONFIG_FTRACE_MCOUNT_RECORD
+    ifndef CONFIG_HAVE_PATCHABLE_FUNCTION_ENTRY
       cmd_ld_ko_o += ; $(objtree)/scripts/recordmcount $(RECORDMCOUNT_FLAGS) $@
+    endif
   endif
 else
       cmd_ld_ko_o =                                                     \

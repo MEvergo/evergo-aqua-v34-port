@@ -133,7 +133,6 @@ extern "C" {
  */
 #if defined(LZ4_FREESTANDING) && (LZ4_FREESTANDING == 1)
 #define LZ4_HEAPMODE 0
-#define LZ4HC_HEAPMODE 0
 #define LZ4_STATIC_LINKING_ONLY_DISABLE_MEMORY_ALLOCATION 1
 #if !defined(LZ4_memcpy)
 #error "LZ4_FREESTANDING requires macro 'LZ4_memcpy'."
@@ -254,6 +253,11 @@ LZ4LIB_API int LZ4_decompress_safe(const char *src, char *dst,
 */
 LZ4LIB_API int LZ4_compressBound(int inputSize);
 
+/*
+ * These stack-backed convenience wrappers are unavailable in kernel and
+ * freestanding builds; use the caller-provided-state variants instead.
+ */
+#if !defined(__KERNEL__) && !LZ4_FREESTANDING
 /*! LZ4_compress_fast() :
     Same as LZ4_compress_default(), but allows selection of "acceleration" factor.
     The larger the acceleration value, the faster the algorithm, but also the lesser the compression.
@@ -264,6 +268,7 @@ LZ4LIB_API int LZ4_compressBound(int inputSize);
 */
 LZ4LIB_API int LZ4_compress_fast(const char *src, char *dst, int srcSize,
 				 int dstCapacity, int acceleration);
+#endif
 
 /*! LZ4_compress_fast_extState() :
  *  Same as LZ4_compress_fast(), using an externally allocated memory space for its state.
@@ -276,6 +281,7 @@ LZ4LIB_API int LZ4_compress_fast_extState(void *state, const char *src,
 					  char *dst, int srcSize,
 					  int dstCapacity, int acceleration);
 
+#if !defined(__KERNEL__) && !LZ4_FREESTANDING
 /*! LZ4_compress_destSize() :
  *  Reverse the logic : compresses as much data as possible from 'src' buffer
  *  into already allocated buffer 'dst', of size >= 'dstCapacity'.
@@ -302,6 +308,7 @@ LZ4LIB_API int LZ4_compress_fast_extState(void *state, const char *src,
  */
 LZ4LIB_API int LZ4_compress_destSize(const char *src, char *dst,
 				     int *srcSizePtr, int targetDstSize);
+#endif
 
 /*! LZ4_decompress_safe_partial() :
  *  Decompress an LZ4 compressed block, of size 'srcSize' at position 'src',

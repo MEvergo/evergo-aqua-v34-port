@@ -39,6 +39,12 @@ struct kpm_patch_update {
 	u32 target;
 };
 
+/* Keep small batches on-stack; larger batches use a heap workspace. */
+#define KPM_HOTPATCH_STACK_MAX 4
+static int kpm_compat_hotpatch_with_workspace(
+	void **addresses, u32 *values, int count,
+	struct ksu_patch_text_op *ops, struct kpm_patch_update *updates);
+
 static const unsigned int kpm_native_kpver = KPM_NATIVE_ABI_VERSION;
 static const unsigned int kpm_native_kver = LINUX_VERSION_CODE;
 static LIST_HEAD(kpm_all_patches);
@@ -179,8 +185,11 @@ static int kpm_compat_hotpatch_nosync(void *address, u32 value)
 {
 	void *addresses[1] = { address };
 	u32 values[1] = { value };
+	struct ksu_patch_text_op op;
+	struct kpm_patch_update update;
 
-	return kpm_compat_hotpatch(addresses, values, 1);
+	return kpm_compat_hotpatch_with_workspace(addresses, values, 1,
+						  &op, &update);
 }
 static int kpm_compat_copy_to_user(void __user *to, const void *from, int len)
 {
@@ -364,11 +373,12 @@ static void kpm_link_patch(struct kpm_module *owner,
 	list_add_tail(&patch->all_node, &kpm_all_patches);
 }
 
-int kpm_compat_hotpatch(void **addresses, u32 *values, int count)
+static int kpm_compat_hotpatch_with_workspace(
+	void **addresses, u32 *values, int count,
+	struct ksu_patch_text_op *ops, struct kpm_patch_update *updates)
 {
 	struct kpm_module *owner = kpm_current_module();
-	struct ksu_patch_text_op ops[KPM_MAX_HOTPATCHES];
-	struct kpm_patch_update updates[KPM_MAX_HOTPATCHES];
+	void *workspace = NULL;
 	int i;
 	int changed = 0;
 	int error = 0;
@@ -381,7 +391,17 @@ int kpm_compat_hotpatch(void **addresses, u32 *values, int count)
 	if (!addresses || !values || count <= 0 ||
 	    count > KPM_MAX_HOTPATCHES)
 		return -EINVAL;
-	memset(updates, 0, sizeof(updates));
+	if (!ops) {
+		workspace = kmalloc_array(count,
+					  sizeof(*ops) + sizeof(*updates),
+					  GFP_KERNEL);
+		if (!workspace)
+			return -ENOMEM;
+		ops = workspace;
+		updates = (struct kpm_patch_update *)
+			((char *)workspace + count * sizeof(*ops));
+	}
+	memset(updates, 0, count * sizeof(*updates));
 	mutex_lock(&kpm_patch_lock);
 	for (i = 0; i < count; i++) {
 		struct kpm_owned_patch *patch;
@@ -464,6 +484,19 @@ out_free:
 	}
 out_unlock:
 	mutex_unlock(&kpm_patch_lock);
+	kfree(workspace);
 	return error;
+}
+
+int kpm_compat_hotpatch(void **addresses, u32 *values, int count)
+{
+	struct ksu_patch_text_op ops[KPM_HOTPATCH_STACK_MAX];
+	struct kpm_patch_update updates[KPM_HOTPATCH_STACK_MAX];
+
+	if (count > 0 && count <= KPM_HOTPATCH_STACK_MAX)
+		return kpm_compat_hotpatch_with_workspace(
+			addresses, values, count, ops, updates);
+	return kpm_compat_hotpatch_with_workspace(addresses, values, count,
+						  NULL, NULL);
 }
 

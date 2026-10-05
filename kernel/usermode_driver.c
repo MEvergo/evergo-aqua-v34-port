@@ -6,6 +6,7 @@
 #include <linux/pipe_fs_i.h>
 #include <linux/mount.h>
 #include <linux/fs_struct.h>
+#include <linux/sched/signal.h>
 #include <linux/task_work.h>
 #include <linux/usermode_driver.h>
 

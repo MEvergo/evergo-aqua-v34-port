@@ -2,7 +2,7 @@
 #include <linux/errno.h>
 #include <linux/kernel.h>
 #include <linux/limits.h>
-#include <linux/string.h>
+#include <linux/slab.h>
 #include <linux/uaccess.h>
 #include "../include/uapi/supercall.h"
 
@@ -34,17 +34,23 @@ static int kpm_copy_user_string(char *buffer, size_t size, u64 user_address,
 
 static int kpm_load_from_user(u64 path_address, u64 args_address)
 {
-	char path[PATH_MAX];
+	char *path;
 	char args[KPM_ARGS_LEN];
 	int error;
 
-	error = kpm_copy_user_string(path, sizeof(path), path_address, 0);
-	if (error)
-		return error;
-	error = kpm_copy_user_string(args, sizeof(args), args_address, 1);
-	if (error)
-		return error;
-	return kpm_load_path(path, args);
+	if (!path_address)
+		return -EFAULT;
+	path = kmalloc(PATH_MAX, GFP_KERNEL);
+	if (!path)
+		return -ENOMEM;
+
+	error = kpm_copy_user_string(path, PATH_MAX, path_address, 0);
+	if (!error)
+		error = kpm_copy_user_string(args, sizeof(args), args_address, 1);
+	if (!error)
+		error = kpm_load_path(path, args);
+	kfree(path);
+	return error;
 }
 
 static int kpm_unload_from_user(u64 name_address)
