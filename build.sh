@@ -55,7 +55,8 @@ fi
 make O="$OUT_DIR" ARCH=arm64 CC="$CLANG" LD="$LD" \
     LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
 
-make -j"$(nproc --all)" O="$OUT_DIR" \
+JOBS="${JOBS:-$(nproc --all)}"
+make -j"$JOBS" O="$OUT_DIR" \
     ARCH=arm64 \
     KSU_VERSION=40900 \
     CC="$CLANG" \

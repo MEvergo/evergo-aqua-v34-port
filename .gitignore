@@ -124,3 +124,15 @@ all.config
 
 # fetched Android config fragments
 kernel/configs/android-*.cfg
+
+# Local SSH connection credentials
+/.connection-credentials
+
+/.runner-admin-token
+
+/.runner-registration-token
+
+# Track the GitHub Actions workflow despite the broad dotfile ignore.
+!.github/
+!.github/workflows/
+!.github/workflows/**
