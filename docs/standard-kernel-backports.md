@@ -56,7 +56,7 @@ ARM64 native 使用 generic syscall 表，ARM64 compat 使用 ARM32 表。两者
 - `DEBUG_FS=n` 不等于 function tracing 不可用；本树 `CONFIG_TRACING` 构建独立 `tracefs`。验证消费者挂载 `tracefs`，不依赖替开启 debugfs 来掩盖配置错误。
 - 目标构建入口为 `bash build.sh`，使用 ZyC clang/LLD `22.0.0`，复用已有 `out/.config` 并构建 `vmlinux Image.gz dtbs modules`。bpfilter helper 单独使用 `BPFILTER_CC` / `BPFILTER_LDFLAGS`；脚本优先寻找 AArch64 GCC，默认静态链接，避免 Android 上依赖不存在的 glibc 动态解释器。缺少目标 libc 的工具链会明确报错，不再静默跳过 bpfilter。
 
-`.github/workflows/kernel-build.yml` builds on pushes to `main` and manual dispatch using a self-hosted runner; it intentionally does not run fork pull-request code on that runner. The runner account must have the pinned ZyC clang/LLD and AArch64 toolchains under `$HOME/toolchains`. CI sets `JOBS=8` for the 16 GiB builder and uploads `Image.gz`, DTBs and kernel modules as a workflow artifact.
+`.github/workflows/kernel-build.yml` 在每次向 `main` 推送提交时触发，不响应 PR，避免把未受信任的 PR 代码交给自托管 Runner。Runner 需在 `$HOME/toolchains` 保留固定版本的 ZyC clang/LLD、AArch64 工具链及私有 XGF3 输入；workflow 会校验 XGF3 SHA256 并放入 `out/`。`build.sh` 默认按可用 CPU 核心数加 1 计算 `-j`，再按每个并发任务预留 2 GiB 可用内存限流；可通过 `JOBS` 显式覆盖。构建产物以单个 GitHub artifact 上传，直接包含 `Image.gz`、DTB 和 `.ko`，不额外套 tar 包。
 
 ## 行为与生命周期适配
 

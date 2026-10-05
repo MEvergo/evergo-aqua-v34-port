@@ -55,7 +55,12 @@ fi
 make O="$OUT_DIR" ARCH=arm64 CC="$CLANG" LD="$LD" \
     LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
 
-JOBS="${JOBS:-$(nproc --all)}"
+if [[ -n "${JOBS:-}" ]]; then
+    echo "Using explicit build parallelism: -j$JOBS"
+else
+    JOBS=$("$ROOT_DIR/scripts/build-jobs.sh")
+    echo "Auto-selected -j$JOBS from CPU count + 1 with a 2 GiB/job memory cap"
+fi
 make -j"$JOBS" O="$OUT_DIR" \
     ARCH=arm64 \
     KSU_VERSION=40900 \

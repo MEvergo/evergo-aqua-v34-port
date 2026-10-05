@@ -3,7 +3,6 @@ name: Kernel build
 on:
   push:
     branches: [main]
-  workflow_dispatch:
 
 permissions:
   contents: read
@@ -22,16 +21,30 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Test build job selection
+        run: bash scripts/test-build-jobs.sh
+
+      - name: Stage private XGF3 input
+        shell: bash
+        run: |
+          source="$HOME/toolchains/private/xgf_v3_ko_arm64_cfi.vendor.o"
+          expected=bdd036932fb255c63f224020413f78d015e0751887dba0e752334da0cefcd480
+          if [[ ! -r "$source" ]]; then
+            echo "::error::Missing pre-provisioned private XGF3 input: $source"
+            exit 1
+          fi
+          printf '%s  %s\n' "$expected" "$source" | sha256sum --check -
+          install -D -m 600 "$source" out/xgf_v3_ko_arm64_cfi.vendor.o
+
       - name: Build kernel
         run: ./build.sh
-        env:
-          JOBS: 8
 
       - name: Upload build outputs
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: evergo-kernel-${{ github.sha }}
           if-no-files-found: error
+          compression-level: 0
           path: |
             out/arch/arm64/boot/Image.gz
             out/arch/arm64/boot/dts/**/*.dtb
