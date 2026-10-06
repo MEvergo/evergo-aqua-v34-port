@@ -131,7 +131,9 @@ HWBP 在地址规范化和 BAS 左移之前拒绝 native 不对齐 execute 和�
 | refs / large-folio / executable `a52dcec56c5b` / `0ee06ee38aed`；large-folio young `508537753b5c` | 本树 on-generation 页在首次 young PTE 观察时已经晋升，无新实现的 first-reference gate / batched-PTE refs 聚合；经典 `VM_EXEC` 保护保留。notify trigger 只清单个 PTE，无 `nr > 1` 的预清理计数问题。 |
 | unevictable `f7e698e326b2`；reparent `0e0ac326c511` / `de4660898b7a`；anon-only `430e4cdcc600`；swap-shadow `f3d652b06043` | 分别依赖非链表 unevictable / `mlock_count` 复用、新 folio reparenting、新 `SWAPPINESS_ANON_ONLY` 接口、swap-table 内嵌 count bits；4.14 对应机制不存在。 |
 | debugfs polarity `eb5ca9094a18` | 本树仍由独立 fops 的 `write` 判断只读 full 输出，不使用 `debugfs_create_file_aux_num()`。 |
-| 其余重命名、布局 / config 重构、diagnostic / tracing 与新回收策略系列 | 不引入新的 memcg FIFO、large-folio 二次访问模型、demotion、swap table 或新的回收循环。旧实现已有成功 aging 后继续回收、包含 sorted-page 的 scan 进度和 flusher wakeup；不为复刻新布局增加抽象。通用传统-LRU RCU-tasks `25f52e812168` 不外推为原补丁未修改的 MGLRU 新 hunks。 |
+| 其余重命名、布局 / config 重构、diagnostic / tracing 与新回收策略系列 | 不引入新的 memcg FIFO、large-folio 二次访问模型、demotion、swap table 或新的回收循环。`6cbdd9726fb5` 的 prefault / workingset insertion 新策略依赖现代 `lru_gen_folio_seq()` 与二次访问模型，不作为旧模型的独立 bugfix 拆入。旧实现已有成功 aging 后继续回收、包含 sorted-page 的 scan 进度和 flusher wakeup；不为复刻新布局增加抽象。通用传统-LRU RCU-tasks `25f52e812168` 不外推为原补丁未修改的 MGLRU 新 hunks。 |
+
+**上游原补丁的切换暂态边界（源码审查推断）**：`a6a8c087dce0` 在 enable 期间兼跑传统回收，但 `mark_page_accessed()` / donor `folio_mark_accessed()` 仍按全局 enabled key 只累计 MGLRU refs。尚未转入 generation 的、无 young PTE 的干净 file-cache 页即使通过文件描述符被重复访问，也未按传统双命中规则 activate，可能在同一轮经典回收中被回收。原 donor 与核对到的 upstream tip 均保留该访问路由；这不是 4.14 API 翻译差异。按严格原补丁范围保留原策略，不自行新增按 generation bits 分流的访问算法；未在设备复现，不宣称本轮消除了该 donor 级风险。
 
 本轮不本地编译内核、模块或临时消费者；编译入口仍是既有 `.github/workflows/kernel-build.yml` 的 self-hosted CI。没有刷机或重启设备。CI 编译 / artifact 结果不等于实机并发 aging、secondary-MMU 或 runtime switching 的行为证明，也不把上一轮 13 个 accounting 场景当成本轮全部修复的测试。
 
