@@ -85,6 +85,57 @@ HWBP 在地址规范化和 BAS 左移之前拒绝 native 不对齐 execute 和�
 
 `everpal_defconfig` 显式设置 `CONFIG_PSI=y`、`CONFIG_PSI_DEFAULT_DISABLED=n`。改动前已有 `out/.config` 就是该状态，此次固定源码配置，避免重新生成时丢失。设备是否创建 `/proc/pressure/{cpu,memory,io}`、启动参数是否禁用 PSI、LMKD 是否使用 PSI，仍须设备验证；不以仓库配置替代运行状态。
 
+### MGLRU 后续修复与 donor 对照
+
+本轮保持 4.14 的 `struct page`、`pgdat->lru_lock`、`mmap_sem` 和旧 shadow 编码，不替换为新的 folio / per-node memcg-LRU 实现。对可用提交先执行 `cherry-pick -x`；冲突只适配现有 API 和对应语义落点，提交保留原作者与 donor SHA。
+
+2026-10-06 固定对照 tips：Android Common `android13-5.10` 为 `6a9fbcc41b62f04b597f38cc6800f04b5c7d8ea6`，`android13-5.15` 为 `d2101e7384ec08fe13cc9faf5eccaa6a84048ac9`；upstream 为 `69f80fef3153299d9c72c53d1d71eef6354b6926`，stable `linux-6.1.y` 为 `a500ba24937a966eab140b95eac42782a7ce2c85`。抓取 Android 2022-01-01 后、upstream / stable 2022-10-01 后的提交历史，结合原补丁和本地函数逐项判断，不用搜索摘要代替适用性检查；另核对 `90d79571541e` 的 rejected-page 修复原提交。
+
+#### 本轮移植
+
+| 修复 | 原提交 | 4.14 落点与适配 |
+| --- | --- | --- |
+| MM 注册移出 IRQ-off 区间 | Android [`ad8cc978ccc1`](https://android.googlesource.com/kernel/common/+/ad8cc978ccc17a0fd1149ebd76407b629907a727/)；upstream `dda1c41a07b4` | exec 在开中断后、`task_unlock()` 前注册 MM。旧 `use_mm()` 路径在注册之后执行，保留旧内核的调用前提。 |
+| cgroup migration 注册竞态 | Android [`a550d93c939a`](https://android.googlesource.com/kernel/common/+/a550d93c939a54df5557cfbf2e354e663896b9b2/)；upstream `de08eaa61564` | 未注册到 memcg 的 MM 不进入 del/add；保留原列表完整性检查。 |
+| 移除 aging 等待造成的优先级反转 | upstream [`7f63cf2d9b9b`](https://github.com/torvalds/linux/commit/7f63cf2d9b9bbe7b90f808927558a66ff737d399.patch)；Android donor `ee355df1` | 同步移植 FIFO 游标 / sequence、walker 退出与最大 generation 推进，不仅删除 wait 调用。Android donor 为 ABI 保留的 `wait` / `nr_walkers` 字段不再参与等待；保留本树 Bloom reset 与 flusher wakeup。 |
+| look-around 跳过特殊 VMA | [`c28ac3c7eb94`](https://github.com/torvalds/linux/commit/c28ac3c7eb945fee6e20f47d576af68fdff1392a.patch) | 在扫描相邻 PTE 前排除 `VM_SPECIAL`，保留已有 `VM_SEQ_READ` / `VM_RAND_READ` 策略。 |
+| page-cache 保护不足 | [`081488051d28`](https://github.com/torvalds/linux/commit/081488051d28d32569ebb7c7a23572778b2e7d57.patch) | 联动调整 page 入代位置、饱和 tier 保护与 refault 条件；旧 token 的有效 refs 为 `refs + workingset`，不照搬新编码。 |
+| secondary-MMU accessed bit | [`1d4832becdc2`](https://github.com/torvalds/linux/commit/1d4832becdc2cdb2cffe2a6050c9d9fd8ff1c58c.patch) | 使用既有 PTE / PMD clear-young-notify API；有 notifier 时不能只按 host young bit 跳过，也不能使用 non-leaf young 快路径。look-around 返回实际 young 结果。 |
+| activation 清理 tier bits | [`f1001f3d3b68`](https://github.com/torvalds/linux/commit/f1001f3d3b6868998cab73d10fda1a5c99ddf963.patch) | active insertion 清理 refs counter / `PG_referenced` / `PG_active`，保留 `PG_workingset` 的 PSI 语义；小 bitmap 的 `activate_page()` 路径同样重置 refs。 |
+| isolated writeback 完成后的重试 | [`359a5e1416ca`](https://github.com/torvalds/linux/commit/359a5e1416caaf9ce28396a65ed3e386cc5de663.patch) | 用旧 page / list / putback API 移植 clean-rejected-page 单次重试、unevictable putback 和每轮 reclaimed 计数。Android 同等 donor 为 `99c4f0739285` / `b805b2f70564`。 |
+| 重试 scan 计数下溢 | [`8b671fe1a879`](https://github.com/torvalds/linux/commit/8b671fe1a879923ecfb72dda6caf01460dd885ef.patch) | 不从 `sc->nr_scanned` 减去重试页数：原扫描可能未取得 page lock，减法会 unsigned wrap；已有 vmpressure guard 不等价。与上一项配套。 |
+| rejected pages 的陈旧 refs | [`90d79571541e`](https://github.com/torvalds/linux/commit/90d79571541eb85e6ea6da5ddce7e80f5db13864.patch) | dirty / writeback rejected-page 晋升也清理完整 tier refs；其他 rejected-page activation 路径已清理。不能只依赖 active insertion 的修复。 |
+| 低但非零 swap 仍允许 anon reclaim | Android [`f57b7aab8598`](https://android.googlesource.com/kernel/common/+/f57b7aab85987a79442a31bab09b8ac0fa2464ef/) | 删除 `< MIN_LRU_BATCH` 的低 swap 禁扫阈值；5.15 对应 `26bac3f09374`。 |
+| swap 耗尽时避免 anon reactivation | Android [`f96eed0e7bf3`](https://android.googlesource.com/kernel/common/+/f96eed0e7bf345294001af45e791152c2cc6eb84/) | 与上一项配套，仅在 swap `<= 0` 时返回零 swappiness；5.15 对应 `0491ec319e94`。 |
+| runtime switching 的 reclaim vacuum | [`a6a8c087dce0`](https://github.com/torvalds/linux/commit/a6a8c087dce00eac0c6d03e560b0fa3d529afa5f.patch) | 原 switching static key 包围 fill / drain；过渡期执行 MGLRU 和传统回收 / aging，禁用假设列表单一的 look-around 与 reference 快路径，并保留传统 refault snapshot。 |
+| NOIO 下过宽的 isolation 拒绝 | [`acd22fbb9f47`](https://github.com/torvalds/linux/commit/acd22fbb9f4714d9beb1796aa27ac7e92d6ab9b3.patch) | 删除把 lazyfree anon 也排除的 swap-constrained 预检查；交给锁内 `shrink_page_list()` 判断，保留独立的 `may_unmap` 约束。 |
+| migration 丢失 refs counter | [`473c371254d2`](https://github.com/torvalds/linux/commit/473c371254d2c9906c286c939eaa99d0fac13e38.patch) | `page_migrate_refs()` 只复制 `LRU_REFS_MASK`，由 `migrate_page_states()` 调用；不复制 generation bits。 |
+| full scan 被 non-leaf young 屏蔽 | [`bceeeaed4817`](https://github.com/torvalds/linux/commit/bceeeaed4817ba7ad9013b4116c97220a60fcf7c.patch) | 将 donor `force_scan` 映射到本树 `priv->full_scan`，同时门控两处 non-leaf young 清理 / 跳过优化。 |
+| NOIO 的 file-first 扫描选择 | [`4acef5694e01`](https://github.com/torvalds/linux/commit/4acef5694e01a2d7de3066e9a6005d485b4374b9.patch) 的适用子 hunk | 同代、非 swappiness=1/200 特例时，`!__GFP_IO` 优先 file；`may_swap` 不等于 IO 权限。NUMA demotion / 新 initial-priority 子 hunk 无本地机制，不引入。 |
+| 显式 eviction quota 向 batch 传递 | [`af827e090489`](https://github.com/torvalds/linux/commit/af827e0904899f14e0cd8e629fea6d55022e53a9.patch) 的适用子 hunks | scan / isolate / evict 传递 `nr_to_scan`；debugfs `-` 传递剩余 reclaim quota；保留 compound-page 粒度。旧常量类型使用 `min_t()`。不引入本树不存在的 proportional-protection controller API。 |
+
+#### 已有等价实现与不适用项
+
+| donor / 候选组 | 不重复移植的依据 |
+| --- | --- |
+| workingset accounting `40259b07af18` / `1247e4a9ca82` / upstream `3af0191a594d` | 上一节已有等价的聚合 refault / activate 统计和旧 shadow 保护。 |
+| per-zone `61d7841115e8` / `c3b46dcc26d7` / `669281ee7ef7` | 本树已经遍历各 zone，将高于 `reclaim_idx` 的页移到后续 generation。 |
+| inc-min race `df2ac088e3a6` / `a1cd02b590d7` / `bb5e7f234eac`；can-swap `d6ca4cd3755f` / `e5366d0f9561` / `a3235ea2a88b` | 上一节列出的 unlock/retry 与 look-around `get_pfn_page()` 前提均不存在。 |
+| kswapd-failures `b130ba4a6259` | 旧 `shrink_node()` 已只在 reclaimable 时清零，不改为 unconditional reset。 |
+| CMA-skip `a759d58f447b` / `67740efa3bb4` / `b7108d66318a` | upstream [`bfe0857c20c6`](https://github.com/torvalds/linux/commit/bfe0857c20c663fcc1592fa4e3a61ca12b07dac9.patch) 已因长时间持有 LRU lock / lockup 风险撤销；本树没有该 skip，不先引入再撤销。 |
+| PTE-table lifetime `2441774f2d28` / `52fc048320ad` | 新 nolock PTE-map / RCU table-freeing 模型不存在；本树 walker 持 read `mmap_sem`，THP collapse 在替换 / 释放表前取 write 锁。 |
+| MM_struct-only pin [`d14514c66cb9`](https://github.com/torvalds/linux/commit/d14514c66cb9721b54318850796c005c446d76d6.patch) | **不能只把 mmget / mmput 换成 mmgrab / mmdrop**：本树普通 `exit_mmap()` 无 write `mmap_sem` 包围 VMA / page-table teardown，也不清空 `mm->mmap`。原补丁所依赖的现代 teardown 锁约束不存在；保留 users 引用以避免 UAF，不自行设计新的 teardown。 |
+| proportional protection `af827e090489` 的其余 hunks；`30d77b7eef01` | 4.14 controller 只有 binary `memory.low` skip / retry，无 `memory.min`、effective protection、`mem_cgroup_protection()` 或相同比例的传统扫描逻辑；后者针对新的 `shrink_one()` / protection 计算调用。不能把新增 controller 设计称为 API 适配。 |
+| memcg-FIFO / rotation `6867c7a33206`、`814bc1de03ea`、`9f550d78b40d`、`8aa420617918`、`4376807bf2d5`、`30d77b7eef01` | 本树用 `mem_cgroup_iter()`，没有 per-node memcg bins / FIFO / rotation lock。保留现有 offline 扫描与 min-TTL 处理。 |
+| high-water / initial-priority `5095a2b23987` / `3f74e6bd3b84` | 本树保留 legacy `kswapd_shrink_node()` 的 zone high-water target、`pgdat_balanced()` 和原扫描预算；无新 `shrink_many()` 或 initial-priority jump-start 触发路径，不外推新的终止算法。 |
+| refs / large-folio / executable `a52dcec56c5b` / `0ee06ee38aed`；large-folio young `508537753b5c` | 本树 on-generation 页在首次 young PTE 观察时已经晋升，无新实现的 first-reference gate / batched-PTE refs 聚合；经典 `VM_EXEC` 保护保留。notify trigger 只清单个 PTE，无 `nr > 1` 的预清理计数问题。 |
+| unevictable `f7e698e326b2`；reparent `0e0ac326c511` / `de4660898b7a`；anon-only `430e4cdcc600`；swap-shadow `f3d652b06043` | 分别依赖非链表 unevictable / `mlock_count` 复用、新 folio reparenting、新 `SWAPPINESS_ANON_ONLY` 接口、swap-table 内嵌 count bits；4.14 对应机制不存在。 |
+| debugfs polarity `eb5ca9094a18` | 本树仍由独立 fops 的 `write` 判断只读 full 输出，不使用 `debugfs_create_file_aux_num()`。 |
+| 其余重命名、布局 / config 重构、diagnostic / tracing 与新回收策略系列 | 不引入新的 memcg FIFO、large-folio 二次访问模型、demotion、swap table 或新的回收循环。旧实现已有成功 aging 后继续回收、包含 sorted-page 的 scan 进度和 flusher wakeup；不为复刻新布局增加抽象。通用传统-LRU RCU-tasks `25f52e812168` 不外推为原补丁未修改的 MGLRU 新 hunks。 |
+
+本轮不本地编译内核、模块或临时消费者；编译入口仍是既有 `.github/workflows/kernel-build.yml` 的 self-hosted CI。没有刷机或重启设备。CI 编译 / artifact 结果不等于实机并发 aging、secondary-MMU 或 runtime switching 的行为证明，也不把上一轮 13 个 accounting 场景当成本轮全部修复的测试。
+
+
 ### Tracing、模块与 BTF
 
 ARM64 两个 patchable NOP 中的第二个是实际 ftrace callsite；第一条初始化为保存入口 LR 的等价指令。BTF 仍保留原始 function entry，查找/安装 ftrace filter 时必须经 `ftrace_call_adjust()` 与 `ftrace_location()` 规范化；调用 original/跳过 trampoline frame 时不能把两种地址混用。
