@@ -12,6 +12,7 @@
 | ARM64 BPF tracing / BTF | 真实 trampoline、fentry/fexit 与 DWARF 生成的内核 BTF | ARM64 QEMU 验证真实 BTF 读取、fentry/fexit 附着、参数/返回值计数及 detach。 |
 | io_uring | 固定来源的完整实现、io-wq、三个 syscall 与 native/compat 分发；不是 opcode 裁剪版 | ARM64 QEMU native/compat、socket/epoll、NVMe raw block/ext4/XFS IOPOLL 与 THP 生命周期 smoke 全部通过。目标配置关闭 THP，详见验证限制。 |
 | Landlock | 固定来源的 ABI 1、三个 syscall、文件系统/ptrace hooks、credential 继承与堆叠 | ARM64 QEMU native/ARM32 compat 验证 ABI 1、deny/allow、策略堆叠及 fork 继承。 |
+| MGLRU workingset / PSI | 回移 page-based accounting 修复，保留旧聚合 vmstat ABI；目标 defconfig 固定启用 PSI | 宿主执行实际 accounting 函数的 13 个场景通过；全新 defconfig + olddefconfig 保留 `PSI=y`、`PSI_DEFAULT_DISABLED=n`。不是实机 reclaim / PSI 验证。 |
 
 验证消费者是临时 native/compat 程序，不替代内核实现。表中结论只覆盖列明且实际执行的路径；QEMU 结果不替代实体 MTK/GT9886 硬件验证。
 
@@ -26,6 +27,7 @@
 | ARM64 ftrace regs | [上游实现](https://github.com/torvalds/linux/commit/3b23e4991fb66f6d152f9055ede271a726ef9f21) | 适配旧汇编宏、编译器探测、模块/内核 trace-site 表与寄存器布局。 |
 | ARM64 BPF text poke / PLT | [上游实现](https://github.com/torvalds/linux/commit/b2ad54e1533e91449cb2a371e034942bd7882b58) | 使用本树 instruction generators 与 ftrace 分工，不把任意非 BPF text 交给 JIT 修改。 |
 | ARM64 BPF trampoline | [上游实现](https://github.com/torvalds/linux/commit/efc9909fdce00a827a37609628223cd45bf95d0b) | 适配本树 `struct bpf_tramp_progs` 与 enter/program/exit ABI，不伪装为更新的 link/cookie/run-context ABI。 |
+| MGLRU workingset accounting | [Android common page-based 修复](https://android.googlesource.com/kernel/common/+/105ef4d2405c8f105f7709c08b65525605571619/) | 先执行 `cherry-pick --no-commit`，再解决旧聚合 `WORKINGSET_*` 与 shadow 编码的冲突；保留本树 page、memcg 和统计 ABI，不引入 folio 或分类型计数器。 |
 
 这些来源固定了可声明的接口版本；后续上游能力不会因为同名 CONFIG 或 syscall 存在而自动成为本树能力。
 
@@ -69,6 +71,19 @@ ARM64 native 使用 generic syscall 表，ARM64 compat 使用 ARM32 表。两者
 Legacy 注入由 L 的逐 KEY/ABS/MT 覆盖标记持久化，不与真实物理 R 或隔离 session S 混用。物理 SYN 只提交对应 pending R；没有对应物理字段更新的 SYN 不清除 L。已接受注入和 `ABS_MT_SLOT` 元数据选择分开处理，被拒绝的普通事件不伪造成新注入。repeat 和 REL/MSC 等瞬时事件仍分发，不重复生成 SYN。MT generation/restart、reset/suspend/shutdown 的语义见 [接口契约](custom-kernel-interfaces.md#legacy-注入的持久性与覆盖)。
 
 HWBP 在地址规范化和 BAS 左移之前拒绝 native 不对齐 execute 和跨 8 字节粒度 watchpoint；修改失败保留此前查询缓存。compat ARM/Thumb、既有 STEP_ON_HIT、权限验证和 rollback 机制保留。
+
+### MGLRU workingset 与 PSI
+
+`lru_gen_refault()` 在 node / memcg 检查通过后先累计 `WORKINGSET_REFAULT`，不再只计算 recent shadow。recent shadow 才增加 MGLRU 的 `refaulted` 反馈和 `WORKINGSET_ACTIVATE`；`sort_page()` 的 tier protection 不再增加 activation。保留 compound page 的 `hpage_nr_pages()` 权重和原 `WORKINGSET_RESTORE` 条件。
+
+本树仍使用旧 shadow 编码，保留 `refs && !workingset` 的保护条件，但把它移到 refault 计数之后，避免旧格式 shadow 进入 MGLRU 反馈，同时避免漏计 refault。按用户确认恢复已有改动删除的 `unpack_shadow()`，否则 token / workingset / node / memcg 会在未初始化时被读取。
+
+两项 Android 5.10 donor 不适用于当前实现，不为凑三补丁系列改写算法：
+
+- [`df2ac088e3a6691a0d7b7ae0db8facbf9e0802d5`](https://android.googlesource.com/kernel/common/+/df2ac088e3a6691a0d7b7ae0db8facbf9e0802d5/) 修复解锁重试时不重新检查 generations 的 race。本树 `inc_min_seq()` 是无失败重试的 `void` 函数，`inc_max_seq()` 在同一个 `pgdat->lru_lock` 临界区内完成检查与推进，无该解锁窗口。
+- [`d6ca4cd3755fd645820c5d876df2f3822ad62704`](https://android.googlesource.com/kernel/common/+/d6ca4cd3755fd645820c5d876df2f3822ad62704/) 修复 look-around 对未初始化 `walk->can_swap` 的依赖。本树 `lru_gen_look_around()` 不读取该字段，也不调用 donor 的 `get_pfn_page()`；因此不能仅因没有局部 `can_swap` 就判定缺失。已有 per-zone reclaim 保持不变。
+
+`everpal_defconfig` 显式设置 `CONFIG_PSI=y`、`CONFIG_PSI_DEFAULT_DISABLED=n`。改动前已有 `out/.config` 就是该状态，此次固定源码配置，避免重新生成时丢失。设备是否创建 `/proc/pressure/{cpu,memory,io}`、启动参数是否禁用 PSI、LMKD 是否使用 PSI，仍须设备验证；不以仓库配置替代运行状态。
 
 ### Tracing、模块与 BTF
 
@@ -185,6 +200,7 @@ KernelSU 的 credential 域写入与 SID 匹配也必须使用 `selinux_cred()`�
 | `lib/lz4/lz4.c`, `lib/lz4/lz4.h`, `lib/lz4/lz4hc.c`, `lib/lz4/lz4hc.h`, `crypto/lz4hc.c` | kernel/freestanding 不提供隐含大栈 workspace 的普通 wrapper；HC optimal table 移入调用者 workspace；crypto 调用者改用现有 `LZ4HC_CLEVEL_DEFAULT` | HC workspace 增至 327,784 bytes；调用者必须用 `LZ4HC_MEM_COMPRESS` 或 `LZ4_sizeofStateHC()` 分配，不能硬编码旧大小。保留压缩等级、流式及字典语义。 |
 | `drivers/kernelsu/kpm/kpm.c`, `drivers/kernelsu/kpm/compat.c` | user-load 路径缓冲区改为动态分配；小批次 hotpatch 使用有界栈 workspace，大批次一次分配 | 保留复制边界、锁与回滚顺序；分配失败返回 `-ENOMEM`。nosync 不新增 workspace 睡眠分配。 |
 | `drivers/misc/mediatek/connectivity/wlan/core/gen4m/common/wlan_lib.c` | 对统计循环局部禁止 Clang 展开 | 保持统计内容和遍历次序，避免展开使调用者栈帧膨胀。 |
+| `mm/workingset.c`, `mm/vmscan.c`, `arch/arm64/configs/everpal_defconfig` | 回移 Google MGLRU workingset accounting，适配旧 shadow 与聚合 vmstat；目标配置显式启用 PSI | refault 与 activation 分开计数，tier protection 不再算 activation；不改 per-zone reclaim、PIDFD 或 thermal。 |
 
 ## 已执行的验证与限制
 
@@ -244,6 +260,12 @@ KernelSU 的 credential 域写入与 SID 匹配也必须使用 `selinux_cred()`�
     - run `37450281697` 出现 410 条 `LLVM ERROR: IO failure on output stream: Broken pipe`，但完成内核 / 模块链接及 artifact 上传。根因是 ThinLTO 的 `llvm-nm | grep -q __ksymtab` 在找到匹配后关闭管道，不是这些对象的编译失败。
     - 只读复用既有 `page_alloc.o`，在忽略 SIGPIPE 的进程环境和 4 KiB 管道下复现相同诊断：修复前 `llvm-nm` 返回 1，`grep` 返回 0。改为完整消费输出后，两者均返回 0、stderr 为空；无导出符号的 `seccomp.o` 仍让 `grep` 返回 1。
     - 使用既有 `vmlinux` 与 `bpfilter.ko` 验证 `objdump` 的有导出 / 无导出检测，工具均正常退出，检测分别返回 0 / 1。四处检测统一改为完整读取，不隐藏工具错误，不改符号版本生成步骤；未本地重编译产品内核，新提交的完整构建与 CI 日志仍需随后 CI 验证。
+
+17. MGLRU workingset accounting 与 PSI 配置：
+    - 从 Android common `105ef4d2405c8f105f7709c08b65525605571619` 执行 `cherry-pick --no-commit`，按本树聚合统计、旧 shadow 编码和已有 per-zone reclaim 解决冲突；没有重写 MGLRU 算法。
+    - 用户禁止本地构建前，临时宿主消费者提取并执行实际 `pack_shadow()`、`unpack_shadow()`、`lru_gen_refault()`、`sort_page()` 和 tier 计算函数，只隔离其内核环境依赖。13 个场景覆盖 recent / stale、anon / file、compound 权重、旧格式保护、restore、异 node、失效 memcg、禁用 memcg 和 tier protection。修复前 11 项失败，修复后 ASan / UBSan 运行报告 `cases=13 failures=0`；这不是实机 MM 或并发 reclaim 证明。
+    - 用户禁止本地构建前，全新输出目录执行 `everpal_defconfig` + `olddefconfig`，确认最终 `CONFIG_PSI=y`、`CONFIG_PSI_DEFAULT_DISABLED=n`。已有 `out/.config` 原本已开启 PSI；产品配置不需要代码 backport。
+    - 本地产品构建在用户要求禁止本地构建后取消，未取得完整构建成功结果。后续内核及模块编译只交给 push 到 `main` 自动触发的 self-hosted CI；本条不声明本轮产品构建或设备运行通过。
 
 此前 QEMU 成功记录只覆盖当时临时消费者实际执行的场景；目标产品配置关闭 `CONFIG_TRANSPARENT_HUGEPAGE`，因此 THP 由独立启用 THP 的 1 GiB guest 验证。NVMe/block/ext4/XFS 均使用 QEMU 提供的真实内核驱动和文件系统路径，不代表实体 UFS/eMMC/DMA 行为。
 

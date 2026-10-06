@@ -272,9 +272,6 @@ void lru_gen_refault(struct page *page, void *shadow)
 	unpack_shadow(shadow, &memcg_id, &pgdat, &token, &workingset);
 
 	refs = token & (BIT(LRU_REFS_WIDTH) - 1);
-	if (refs && !workingset)
-		return;
-
 	if (page_pgdat(page) != pgdat)
 		return;
 
@@ -286,6 +283,12 @@ void lru_gen_refault(struct page *page, void *shadow)
 	token >>= LRU_REFS_WIDTH;
 	lruvec = mem_cgroup_lruvec(pgdat, memcg);
 	lrugen = &lruvec->lrugen;
+
+	mod_lruvec_state(lruvec, WORKINGSET_REFAULT, delta);
+
+	if (refs && !workingset)
+		goto unlock;
+
 	min_seq = READ_ONCE(lrugen->min_seq[type]);
 	if (token != (min_seq & (EVICTION_MASK >> LRU_REFS_WIDTH)))
 		goto unlock;
@@ -293,7 +296,7 @@ void lru_gen_refault(struct page *page, void *shadow)
 	hist = lru_hist_from_seq(min_seq);
 	tier = lru_tier_from_refs(refs + workingset);
 	atomic_long_add(delta, &lrugen->refaulted[hist][type][tier]);
-	mod_lruvec_state(lruvec, WORKINGSET_REFAULT, delta);
+	mod_lruvec_state(lruvec, WORKINGSET_ACTIVATE, delta);
 
 	/*
 	 * Count the following two cases as stalls:
