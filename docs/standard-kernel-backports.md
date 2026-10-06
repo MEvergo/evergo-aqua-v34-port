@@ -179,6 +179,7 @@ KernelSU 的 credential 域写入与 SID 匹配也必须使用 `selinux_cred()`�
 | `docs/custom-kernel-interfaces.md`, `docs/standard-kernel-backports.md` | 接口契约、完整变更登记、来源/ABI与验证边界 | 自定义内核差异有明确维护入口；不改 `docs/superpowers/`。 |
 | `arch/arm64/configs/everpal_defconfig`, `out/.config`, `kernel/usermode_driver.c`, `kernel/params.c`, `fs/nomount.c`, `Makefile`, `net/Makefile`, `net/bpfilter/Makefile`, `build.sh` | 启用 FAULT_INJECTION/BPFILTER；补齐 usermode driver 声明及 const 初始化；修正工具链探测、目标 helper 编译与模块构建入口 | `BPFILTER_UMH=m`；helper 使用目标 libc 静态链接，链接失败显式终止。保留 STATIC_USERMODEHELPER 安全路由。 |
 | `scripts/Makefile.modpost` | ThinLTO 模块在 `HAVE_PATCHABLE_FUNCTION_ENTRY=y` 时跳过旧 `recordmcount` 步骤，与 vmlinux 链接规则一致 | 干净输出目录不再依赖遗留的 `scripts/recordmcount` 可执行文件；非 patchable-entry 路径保持原行为。 |
+| `scripts/Makefile.build` | C / 汇编的符号版本检测完整读取 `llvm-nm` / `objdump` 输出，不使用提前退出的 `grep -q` | 避免 LLVM 输出管道被提前关闭；保留 `__ksymtab` 匹配结果、符号版本生成和工具 stderr。 |
 | `kernel/bpf/verifier.c`, `tools/bpf/resolve_btfids/main.c` | 按实际 error-injection 白名单与配置生成 BTF set；区分零成员集合和未解析普通 ID | 不为不存在的函数写入伪 ID；合法空集合不再误报警，真正缺失的类型仍报警。 |
 | `include/linux/perf_event.h`, `kernel/events/internal.h`, `kernel/events/core.c`, `kernel/events/ring_buffer.c` | perf 内部 `struct ring_buffer` 更名为 `struct perf_buffer` | 消除与 tracing ring buffer 的异构同名 BTF 冲突；布局、字段及用户 ABI 不变。 |
 | `lib/lz4/lz4.c`, `lib/lz4/lz4.h`, `lib/lz4/lz4hc.c`, `lib/lz4/lz4hc.h`, `crypto/lz4hc.c` | kernel/freestanding 不提供隐含大栈 workspace 的普通 wrapper；HC optimal table 移入调用者 workspace；crypto 调用者改用现有 `LZ4HC_CLEVEL_DEFAULT` | HC workspace 增至 327,784 bytes；调用者必须用 `LZ4HC_MEM_COMPRESS` 或 `LZ4_sizeofStateHC()` 分配，不能硬编码旧大小。保留压缩等级、流式及字典语义。 |
@@ -238,6 +239,11 @@ KernelSU 的 credential 域写入与 SID 匹配也必须使用 `selinux_cred()`�
     - 仅由 GitHub CI 构建内核（run `37450281697`），没有本地重编译产品内核。新 boot 的 kernel 与该 CI `Image.gz` 逐字节一致，OrangeFox ramdisk / DTB 与此前镜像逐字节一致。128 MiB 镜像 SHA256 为 `dea80b18bdebd97a8467b745d5f441b565aa46d56ae3ecf34ddc4634c6378c5a`，A 槽分区刷后及 recovery 中读取的 hash 均一致，B 槽未改动。
     - Android 实际运行 `4.14.357-Aqua`，首次启动 `sys.boot_completed=1`、`bootanim=stopped`、`netd=running`；持续观察到 uptime 123.72 秒，窗口前台为 MIUI Launcher，SELinux 为 `Enforcing`。
     - 同一镜像成功进入 OrangeFox R12.0，完成 metadata / user 0 解密、加载主界面与文件管理页面。过早使用 `adb reboot` 返回系统时仍进入 recovery；等待初始化完成后使用 `twrp reboot` 正常返回 Android，第二次也观察到 `sys.boot_completed=1`、`netd=running` 和相同 CI 内核版本。未恢复原厂 boot、未擦除用户数据或禁用启动监控；这些结果只覆盖本次启动 / 解密 / 返回系统，不代表长期稳定性或全部硬件功能验证。
+
+16. CI 符号检测管道的 `Broken pipe` 修复：
+    - run `37450281697` 出现 410 条 `LLVM ERROR: IO failure on output stream: Broken pipe`，但完成内核 / 模块链接及 artifact 上传。根因是 ThinLTO 的 `llvm-nm | grep -q __ksymtab` 在找到匹配后关闭管道，不是这些对象的编译失败。
+    - 只读复用既有 `page_alloc.o`，在忽略 SIGPIPE 的进程环境和 4 KiB 管道下复现相同诊断：修复前 `llvm-nm` 返回 1，`grep` 返回 0。改为完整消费输出后，两者均返回 0、stderr 为空；无导出符号的 `seccomp.o` 仍让 `grep` 返回 1。
+    - 使用既有 `vmlinux` 与 `bpfilter.ko` 验证 `objdump` 的有导出 / 无导出检测，工具均正常退出，检测分别返回 0 / 1。四处检测统一改为完整读取，不隐藏工具错误，不改符号版本生成步骤；未本地重编译产品内核，新提交的完整构建与 CI 日志仍需随后 CI 验证。
 
 此前 QEMU 成功记录只覆盖当时临时消费者实际执行的场景；目标产品配置关闭 `CONFIG_TRANSPARENT_HUGEPAGE`，因此 THP 由独立启用 THP 的 1 GiB guest 验证。NVMe/block/ext4/XFS 均使用 QEMU 提供的真实内核驱动和文件系统路径，不代表实体 UFS/eMMC/DMA 行为。
 
