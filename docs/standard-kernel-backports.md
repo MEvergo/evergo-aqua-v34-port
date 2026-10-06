@@ -115,6 +115,8 @@ Blockdev 的 `IOCB_NOWAIT` 独立于 `IOCB_HIPRI` 设置 `REQ_NOWAIT`。XFS NOWA
 
 完整 ruleset/object/credential/filesystem/ptrace 实现使用共同的 LSM 对象 blob。SELinux/Smack 的 superblock 私有状态改为各自的对齐 offset，移除旧独占 allocation/free 所有权，而不是禁用这些 LSM。`sb_delete` 在 `evict_inodes()` 之后、`put_super()` 之前 detach Landlock inode objects，并用真正的 hashed `wait_var_event` / `wake_up_var` 等待未完成释放。
 
+KernelSU 的 credential 域写入与 SID 匹配也必须使用 `selinux_cred()`，不能仅凭 `LINUX_VERSION_CODE < 5.0` 将 composite blob 起始地址解释为 SELinux 对象。本产品内核实际为 4.14.357，启用排在 SELinux 前面的 Landlock 后，旧直接访问会覆盖 Landlock domain 指针，并在 `hook_cred_free()` / `put_cred_rcu()` 中崩溃；适配 accessor，不通过禁用 Landlock 或调整 LSM 顺序掩盖问题。
+
 已有 `do_move_mount()` 在取得精确来源 path 后、mount attachment 前执行 `security_move_mount()`；本次不为此新造另一个 mount syscall。既有 `security_sb_mount` 检查不删除。ABI 1 的 filesystem topology 限制、规则交集、fork 继承及 ptrace 层级检查均保留固定来源语义。
 
 ## 文件级新增与改动登记
@@ -168,6 +170,8 @@ Blockdev 的 `IOCB_NOWAIT` 独立于 `IOCB_HIPRI` 设置 `REQ_NOWAIT`。XFS NOWA
 | `include/linux/wait_bit.h`, `kernel/sched/wait_bit.c` | 标准 hashed wait-var基础设施 | Landlock sb teardown 的真实等待/唤醒。 |
 | `include/linux/lsm_hook_defs.h`, `include/linux/lsm_hooks.h`, `include/linux/security.h`, `security/security.c`, `fs/super.c`, `fs/namespace.c` | shared blob accounting/alignment、sb_delete/move_mounthooks及VFS调用 | 与既有 LSM 共存并正确回收。 |
 | `security/selinux/include/objsec.h`, `security/selinux/hooks.c`, `security/selinux/ss/services.c`, `security/smack/smack.h`, `security/smack/smack_lsm.c` | 原 major LSM对象改用各自blob offset | 不禁用SELinux/Smack，不遗留旧独占free所有权。 |
+| `drivers/kernelsu/selinux/selinux.c` | credential 域写入与 SID 匹配统一使用 SELinux blob accessor，不按基础内核版本假定独占布局 | 兼容本树回移植的 composite LSM blobs，保留 Landlock 与 SELinux。 |
+| `net/ipv4/bpfilter/sockopt.c` | 可选 backend 加载失败或未注册时返回 `-ENOPROTOOPT` | IPv4 sockopt 继续进入 legacy xtables；不让缺失的 bpfilter helper 阻断 Android netd。 |
 | `docs/custom-kernel-interfaces.md`, `docs/standard-kernel-backports.md` | 接口契约、完整变更登记、来源/ABI与验证边界 | 自定义内核差异有明确维护入口；不改 `docs/superpowers/`。 |
 | `arch/arm64/configs/everpal_defconfig`, `out/.config`, `kernel/usermode_driver.c`, `kernel/params.c`, `fs/nomount.c`, `Makefile`, `net/Makefile`, `net/bpfilter/Makefile`, `build.sh` | 启用 FAULT_INJECTION/BPFILTER；补齐 usermode driver 声明及 const 初始化；修正工具链探测、目标 helper 编译与模块构建入口 | `BPFILTER_UMH=m`；helper 使用目标 libc 静态链接，链接失败显式终止。保留 STATIC_USERMODEHELPER 安全路由。 |
 | `scripts/Makefile.modpost` | ThinLTO 模块在 `HAVE_PATCHABLE_FUNCTION_ENTRY=y` 时跳过旧 `recordmcount` 步骤，与 vmlinux 链接规则一致 | 干净输出目录不再依赖遗留的 `scripts/recordmcount` 可执行文件；非 patchable-entry 路径保持原行为。 |
@@ -223,6 +227,13 @@ Blockdev 的 `IOCB_NOWAIT` 独立于 `IOCB_HIPRI` 设置 `REQ_NOWAIT`。XFS NOWA
     | `wlanDumpAllBssStatistics` | 3,648 | 144 |
 
     完整 ELF 符号表确认两个各占 16,464-byte 栈帧的普通 LZ4 wrapper 不再出现在内核，也没有隔离测试的 `stack_smoke_patch_target`。WLAN 只做了编译与最终机器码验证，未宣称实体 WLAN 运行通过。
+
+15. 实体 evergo 的 OrangeFox / Android 双料 boot 启动验证：
+    - 修复前 Android `netd` 因 bpfilter backend 不可用而无法初始化 legacy IPv4 tables。`d05cffa0e8ee` 将 backend 不可用转换为 `-ENOPROTOOPT`；实体只读 `IPT_SO_GET_INFO` 消费者随后成功读取 `filter`、`raw`、`mangle`、`nat`，Android `netd` 初始化也成功。
+    - 新启用的 Landlock 暴露 KernelSU 旧基础版本分支的 credential blob 布局错误；pstore 含 `hook_cred_free()` / `put_cred_rcu()` 异常。连续失败后，`mqsasd` 的 BootMonitor 在计数 5 时主动请求 `reboot,recovery`，不是每次重启都由 BootMonitor 发起。`aee621e6c7d0` 迁移两处 SELinux credential 访问到已有 accessor，保留 Landlock 和其他 LSM。
+    - 仅由 GitHub CI 构建内核（run `37450281697`），没有本地重编译产品内核。新 boot 的 kernel 与该 CI `Image.gz` 逐字节一致，OrangeFox ramdisk / DTB 与此前镜像逐字节一致。128 MiB 镜像 SHA256 为 `dea80b18bdebd97a8467b745d5f441b565aa46d56ae3ecf34ddc4634c6378c5a`，A 槽分区刷后及 recovery 中读取的 hash 均一致，B 槽未改动。
+    - Android 实际运行 `4.14.357-Aqua`，首次启动 `sys.boot_completed=1`、`bootanim=stopped`、`netd=running`；持续观察到 uptime 123.72 秒，窗口前台为 MIUI Launcher，SELinux 为 `Enforcing`。
+    - 同一镜像成功进入 OrangeFox R12.0，完成 metadata / user 0 解密、加载主界面与文件管理页面。过早使用 `adb reboot` 返回系统时仍进入 recovery；等待初始化完成后使用 `twrp reboot` 正常返回 Android，第二次也观察到 `sys.boot_completed=1`、`netd=running` 和相同 CI 内核版本。未恢复原厂 boot、未擦除用户数据或禁用启动监控；这些结果只覆盖本次启动 / 解密 / 返回系统，不代表长期稳定性或全部硬件功能验证。
 
 此前 QEMU 成功记录只覆盖当时临时消费者实际执行的场景；目标产品配置关闭 `CONFIG_TRANSPARENT_HUGEPAGE`，因此 THP 由独立启用 THP 的 1 GiB guest 验证。NVMe/block/ext4/XFS 均使用 QEMU 提供的真实内核驱动和文件系统路径，不代表实体 UFS/eMMC/DMA 行为。
 

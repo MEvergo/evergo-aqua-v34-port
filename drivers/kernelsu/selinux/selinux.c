@@ -36,7 +36,7 @@ static int transive_to_domain(const char *domain, struct cred *cred, bool clear_
 #else
     struct cred_security_struct *tsec;
 #endif
-    /* This 4.19 tree backports composite LSM credential blobs. */
+    /* This tree backports composite LSM credential blobs. */
     tsec = selinux_cred(cred);
     if (!tsec) {
         pr_err("tsec == NULL!\n");
