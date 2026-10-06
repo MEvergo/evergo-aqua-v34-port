@@ -31,20 +31,13 @@ static int transive_to_domain(const char *domain, struct cred *cred, bool clear_
 {
     u32 sid = 0;
     int error;
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)
-    struct task_security_struct *tsec;
-#elif LINUX_VERSION_CODE < KERNEL_VERSION(6, 18, 0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 18, 0)
     struct task_security_struct *tsec;
 #else
     struct cred_security_struct *tsec;
 #endif
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)
-    tsec = cred->security;
-#elif LINUX_VERSION_CODE < KERNEL_VERSION(6, 18, 0)
+    /* This 4.19 tree backports composite LSM credential blobs. */
     tsec = selinux_cred(cred);
-#else
-    tsec = selinux_cred(cred);
-#endif
     if (!tsec) {
         pr_err("tsec == NULL!\n");
         return -1;
@@ -183,9 +176,7 @@ static bool is_sid_match(const struct cred *cred, u32 cached_sid, const char *fa
     if (!cred) {
         return false;
     }
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)
-    const struct task_security_struct *tsec = cred->security;
-#elif LINUX_VERSION_CODE < KERNEL_VERSION(6, 18, 0)
+#if LINUX_VERSION_CODE < KERNEL_VERSION(6, 18, 0)
     const struct task_security_struct *tsec = selinux_cred(cred);
 #else
     const struct cred_security_struct *tsec = selinux_cred(cred);
