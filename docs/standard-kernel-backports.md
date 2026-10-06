@@ -74,7 +74,7 @@ HWBP 在地址规范化和 BAS 左移之前拒绝 native 不对齐 execute 和�
 
 ### MGLRU workingset 与 PSI
 
-`lru_gen_refault()` 在 node / memcg 检查通过后先累计 `WORKINGSET_REFAULT`，不再只计算 recent shadow。recent shadow 才增加 MGLRU 的 `refaulted` 反馈和 `WORKINGSET_ACTIVATE`；`sort_page()` 的 tier protection 不再增加 activation。保留 compound page 的 `hpage_nr_pages()` 权重和原 `WORKINGSET_RESTORE` 条件。
+`lru_gen_refault()` 在 node / memcg 检查通过后先累计 `WORKINGSET_REFAULT`，不再只计算 recent shadow。recent shadow 才增加 MGLRU 的 `refaulted` 反馈和 `WORKINGSET_ACTIVATE`；`sort_page()` 的 tier protection 不再增加 activation。保留 compound page 的 `hpage_nr_pages()` 权重；本轮按 `081488051d28` 将 recent refault 的 `WORKINGSET_RESTORE` 条件扩展为 fault 或 `refs + workingset >= BIT(LRU_REFS_WIDTH) - 1`。
 
 本树仍使用旧 shadow 编码，保留 `refs && !workingset` 的保护条件，但把它移到 refault 计数之后，避免旧格式 shadow 进入 MGLRU 反馈，同时避免漏计 refault。按用户确认恢复已有改动删除的 `unpack_shadow()`，否则 token / workingset / node / memcg 会在未初始化时被读取。
 
@@ -109,7 +109,7 @@ HWBP 在地址规范化和 BAS 左移之前拒绝 native 不对齐 execute 和�
 | swap 耗尽时避免 anon reactivation | Android [`f96eed0e7bf3`](https://android.googlesource.com/kernel/common/+/f96eed0e7bf345294001af45e791152c2cc6eb84/) | 与上一项配套，仅在 swap `<= 0` 时返回零 swappiness；5.15 对应 `0491ec319e94`。 |
 | runtime switching 的 reclaim vacuum | [`a6a8c087dce0`](https://github.com/torvalds/linux/commit/a6a8c087dce00eac0c6d03e560b0fa3d529afa5f.patch) | 原 switching static key 包围 fill / drain；过渡期执行 MGLRU 和传统回收 / aging，禁用假设列表单一的 look-around 与 reference 快路径，并保留传统 refault snapshot。 |
 | NOIO 下过宽的 isolation 拒绝 | [`acd22fbb9f47`](https://github.com/torvalds/linux/commit/acd22fbb9f4714d9beb1796aa27ac7e92d6ab9b3.patch) | 删除把 lazyfree anon 也排除的 swap-constrained 预检查；交给锁内 `shrink_page_list()` 判断，保留独立的 `may_unmap` 约束。 |
-| migration 丢失 refs counter | [`473c371254d2`](https://github.com/torvalds/linux/commit/473c371254d2c9906c286c939eaa99d0fac13e38.patch) | `page_migrate_refs()` 只复制 `LRU_REFS_MASK`，由 `migrate_page_states()` 调用；不复制 generation bits。 |
+| migration 丢失 refs counter | [`473c371254d2`](https://github.com/torvalds/linux/commit/473c371254d2c9906c286c939eaa99d0fac13e38.patch) | `page_migrate_refs()` 只复制 `LRU_REFS_MASK`，由 `migrate_page_states()` 调用；不复制 generation bits。参数名使用 `newpage` / `oldpage`，避免 4.14 `set_mask_bits()` 的局部 `new` / `old` 遮蔽指针。 |
 | full scan 被 non-leaf young 屏蔽 | [`bceeeaed4817`](https://github.com/torvalds/linux/commit/bceeeaed4817ba7ad9013b4116c97220a60fcf7c.patch) | 将 donor `force_scan` 映射到本树 `priv->full_scan`，同时门控两处 non-leaf young 清理 / 跳过优化。 |
 | NOIO 的 file-first 扫描选择 | [`4acef5694e01`](https://github.com/torvalds/linux/commit/4acef5694e01a2d7de3066e9a6005d485b4374b9.patch) 的适用子 hunk | 同代、非 swappiness=1/200 特例时，`!__GFP_IO` 优先 file；`may_swap` 不等于 IO 权限。NUMA demotion / 新 initial-priority 子 hunk 无本地机制，不引入。 |
 | 显式 eviction quota 向 batch 传递 | [`af827e090489`](https://github.com/torvalds/linux/commit/af827e0904899f14e0cd8e629fea6d55022e53a9.patch) 的适用子 hunks | scan / isolate / evict 传递 `nr_to_scan`；debugfs `-` 传递剩余 reclaim quota；保留 compound-page 粒度。旧常量类型使用 `min_t()`。不引入本树不存在的 proportional-protection controller API。 |

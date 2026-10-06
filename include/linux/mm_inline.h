@@ -285,11 +285,11 @@ static inline bool lru_gen_del_page(struct lruvec *lruvec, struct page *page, bo
 	return true;
 }
 
-static inline void page_migrate_refs(struct page *new, struct page *old)
+static inline void page_migrate_refs(struct page *newpage, struct page *oldpage)
 {
-	unsigned long refs = READ_ONCE(old->flags) & LRU_REFS_MASK;
+	unsigned long refs = READ_ONCE(oldpage->flags) & LRU_REFS_MASK;
 
-	set_mask_bits(&new->flags, LRU_REFS_MASK, refs);
+	set_mask_bits(&newpage->flags, LRU_REFS_MASK, refs);
 }
 
 #else
@@ -319,7 +319,7 @@ static inline bool lru_gen_del_page(struct lruvec *lruvec, struct page *page, bo
 	return false;
 }
 
-static inline void page_migrate_refs(struct page *new, struct page *old)
+static inline void page_migrate_refs(struct page *newpage, struct page *oldpage)
 {
 
 }
