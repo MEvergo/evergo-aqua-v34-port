@@ -54,9 +54,13 @@ ARM64 native 使用 generic syscall 表，ARM64 compat 使用 ARM32 表。两者
 - 新路径省去 `-pg`、`recordmcount` 与 `BUILD_C_RECORDMCOUNT`；不支持 patchable entry 的编译器保留既有 `-pg` 路径。`notrace` 使用显式零个 patchable entries 的属性。
 - BTF 构建要求 `pahole >= 1.32`。生成时跳过 `ENUM64`、`DECL_TAG` 与 `TYPE_TAG`，因为本树 BTF parser 只支持到 `DATASEC`；没有开启 float BTF 编码。不能把无法解析的宿主新类型编码直接塞进旧内核。
 - `DEBUG_FS=n` 不等于 function tracing 不可用；本树 `CONFIG_TRACING` 构建独立 `tracefs`。验证消费者挂载 `tracefs`，不依赖替开启 debugfs 来掩盖配置错误。
-- 目标构建入口为 `bash build.sh`，使用 ZyC clang/LLD `22.0.0`，复用已有 `out/.config` 并构建 `vmlinux Image.gz dtbs modules`。bpfilter helper 单独使用 `BPFILTER_CC` / `BPFILTER_LDFLAGS`；脚本优先寻找 AArch64 GCC，默认静态链接，避免 Android 上依赖不存在的 glibc 动态解释器。缺少目标 libc 的工具链会明确报错，不再静默跳过 bpfilter。
+- 目标构建入口为 `bash build.sh`，使用 ZyC clang/LLD `22.0.0`，通过 ccache 调用目标 `CC` 与宿主 `HOSTCC`，构建 `vmlinux Image.gz dtbs modules`。可用 `OUT_DIR` 指定输出目录；本地默认仍为仓库内的 `out/`。bpfilter helper 单独使用 `BPFILTER_CC` / `BPFILTER_LDFLAGS`；脚本优先寻找 AArch64 GCC，默认静态链接，避免 Android 上依赖不存在的 glibc 动态解释器。缺少 ccache 或目标 libc 工具链会明确报错。
 
-`.github/workflows/kernel-build.yml` 在每次向 `main` 推送提交时触发，不响应 PR，避免把未受信任的 PR 代码交给自托管 Runner。Runner 需在 `$HOME/toolchains` 保留固定版本的 ZyC clang/LLD、AArch64 工具链及私有 XGF3 输入；workflow 会校验 XGF3 SHA256 并放入 `out/`。`build.sh` 默认按可用 CPU 核心数加 1 计算 `-j`，再按每个并发任务预留 2 GiB 可用内存限流；可通过 `JOBS` 显式覆盖。构建产物以单个 GitHub artifact 上传，直接包含 `Image.gz`、DTB 和 `.ko`，不额外套 tar 包。
+`.github/workflows/kernel-build.yml` 在每次向 `main` 推送提交时触发，不响应 PR，避免把未受信任的 PR 代码交给自托管 Runner。Runner 需安装 `ccache`，并在 `$HOME/toolchains` 保留固定版本的 ZyC clang/LLD、AArch64 工具链及私有 XGF3 输入。checkout 保持默认清理；CI 使用 workspace 外的 `$HOME/.cache/evergo-kernel/out` 保存 Kbuild 增量状态，使用同级 `ccache/` 保存编译器缓存，容量上限为 30 GiB，每次构建重置并展示命中统计，不通过 `actions/cache` 搬运整个 `out/`。XGF3 每次校验 SHA256，仅在内容不同或目标缺失时复制到 `OUT_DIR`，避免无意义地改变 mtime。
+
+`build.sh` 以 `everpal_defconfig` 的 SHA256 管理 `OUT_DIR/.ci-defconfig.sha256`：缺少 `.config`、缺少缓存戳或 defconfig 内容变更时重新应用 defconfig，成功后才写入缓存戳；随后始终执行 `olddefconfig`。首次没有缓存戳时，即使已有 `.config` 也会从 defconfig 重新生成，不将未登记的旧配置当作有效缓存。编译时间默认来自当前 Git commit 的 `SOURCE_DATE_EPOCH`，`KBUILD_BUILD_TIMESTAMP`、`KBUILD_BUILD_USER`、`KBUILD_BUILD_HOST` 均允许环境覆盖，避免每次运行使用当前时间和宿主身份导致缓存失效。
+
+`build.sh` 默认按可用 CPU 核心数加 1 计算 `-j`，再按每个并发任务预留 2 GiB 可用内存限流；可通过 `JOBS` 显式覆盖。artifact 从实际 `OUT_DIR` 上传 `Image.gz`、DTB 和 `.ko`，不额外套 tar 包。需要重建增量状态时，只清理 runner 的 `out/` 缓存目录并保留同级 `ccache/`；不关闭 checkout 清理来保留 source-tree 残留。
 
 ## 行为与生命周期适配
 

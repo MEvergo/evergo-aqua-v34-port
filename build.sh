@@ -26,8 +26,21 @@ if [[ "$CLANG_VERSION" != *"22.0.0"* || "$LD_VERSION" != *"22.0.0"* ]]; then
 fi
 
 export PATH="$TC_DIR/bin:$PATH"
-export CC="$CLANG"
+if ! command -v ccache >/dev/null 2>&1; then
+    echo "error: ccache not found" >&2
+    exit 1
+fi
+export CCACHE_DIR="${CCACHE_DIR:-$HOME/.cache/evergo-kernel/ccache}"
+mkdir -p "$CCACHE_DIR"
+export CC="ccache $CLANG"
+export HOSTCC="ccache $CLANG"
 export LD
+
+SOURCE_DATE_EPOCH="${SOURCE_DATE_EPOCH:-$(git log -1 --format=%ct)}"
+export SOURCE_DATE_EPOCH
+export KBUILD_BUILD_TIMESTAMP="${KBUILD_BUILD_TIMESTAMP:-@$SOURCE_DATE_EPOCH}"
+export KBUILD_BUILD_USER="${KBUILD_BUILD_USER:-github-actions}"
+export KBUILD_BUILD_HOST="${KBUILD_BUILD_HOST:-self-hosted}"
 
 # The embedded helper needs a target libc, not the host compiler's headers.
 if [[ -z "${BPFILTER_CC:-}" ]]; then
@@ -41,18 +54,26 @@ export BPFILTER_CC
 # Android has no glibc ELF interpreter, including when bpfilter is a module.
 export BPFILTER_LDFLAGS="${BPFILTER_LDFLAGS:--static}"
 
-OUT_DIR="$ROOT_DIR/out"
+OUT_DIR="${OUT_DIR:-$ROOT_DIR/out}"
 DEFCONFIG="everpal_defconfig"
 
-if [[ ! -f "$OUT_DIR/.config" ]]; then
-    mkdir -p "$OUT_DIR"
-    make O="$OUT_DIR" ARCH=arm64 CC="$CLANG" LD="$LD" \
+DEFCONFIG_PATH="$ROOT_DIR/arch/arm64/configs/$DEFCONFIG"
+DEFCONFIG_STAMP="$OUT_DIR/.ci-defconfig.sha256"
+DEFCONFIG_HASH=$(sha256sum "$DEFCONFIG_PATH")
+DEFCONFIG_HASH="${DEFCONFIG_HASH%% *}"
+mkdir -p "$OUT_DIR"
+
+if [[ ! -f "$OUT_DIR/.config" || ! -f "$DEFCONFIG_STAMP" ]] ||
+    [[ "$(cat "$DEFCONFIG_STAMP")" != "$DEFCONFIG_HASH" ]]; then
+    echo "Generating configuration from $DEFCONFIG"
+    make O="$OUT_DIR" ARCH=arm64 CC="$CC" HOSTCC="$HOSTCC" LD="$LD" \
         LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- "$DEFCONFIG"
+    printf '%s\n' "$DEFCONFIG_HASH" > "$DEFCONFIG_STAMP"
 else
-    echo "Using existing configuration: $OUT_DIR/.config"
+    echo "Using cached configuration: $OUT_DIR/.config"
 fi
 
-make O="$OUT_DIR" ARCH=arm64 CC="$CLANG" LD="$LD" \
+make O="$OUT_DIR" ARCH=arm64 CC="$CC" HOSTCC="$HOSTCC" LD="$LD" \
     LLVM=1 LLVM_IAS=1 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
 
 if [[ -n "${JOBS:-}" ]]; then
@@ -64,7 +85,8 @@ fi
 make -j"$JOBS" O="$OUT_DIR" \
     ARCH=arm64 \
     KSU_VERSION=40900 \
-    CC="$CLANG" \
+    CC="$CC" \
+    HOSTCC="$HOSTCC" \
     LD="$LD" \
     LLVM=1 \
     LLVM_IAS=1 \

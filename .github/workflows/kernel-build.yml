@@ -21,23 +21,49 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Prepare persistent build cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v ccache >/dev/null 2>&1; then
+            echo "::error::ccache is not installed on the self-hosted runner"
+            exit 1
+          fi
+          OUT_DIR="$HOME/.cache/evergo-kernel/out"
+          export CCACHE_DIR="$HOME/.cache/evergo-kernel/ccache"
+          mkdir -p "$OUT_DIR" "$CCACHE_DIR"
+          ccache --max-size 30G
+          ccache --zero-stats
+          {
+            echo "OUT_DIR=$OUT_DIR"
+            echo "CCACHE_DIR=$CCACHE_DIR"
+          } >> "$GITHUB_ENV"
+
       - name: Test build job selection
         run: bash scripts/test-build-jobs.sh
 
       - name: Stage private XGF3 input
         shell: bash
         run: |
+          set -euo pipefail
           source="$HOME/toolchains/private/xgf_v3_ko_arm64_cfi.vendor.o"
+          destination="$OUT_DIR/xgf_v3_ko_arm64_cfi.vendor.o"
           expected=bdd036932fb255c63f224020413f78d015e0751887dba0e752334da0cefcd480
           if [[ ! -r "$source" ]]; then
             echo "::error::Missing pre-provisioned private XGF3 input: $source"
             exit 1
           fi
           printf '%s  %s\n' "$expected" "$source" | sha256sum --check -
-          install -D -m 600 "$source" out/xgf_v3_ko_arm64_cfi.vendor.o
+          if [[ ! -f "$destination" ]] || ! cmp -s "$source" "$destination"; then
+            install -m 600 "$source" "$destination"
+          fi
 
       - name: Build kernel
         run: ./build.sh
+
+      - name: Show compiler cache statistics
+        if: ${{ always() && env.CCACHE_DIR != '' }}
+        run: ccache --show-stats
 
       - name: Upload build outputs
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -46,6 +72,6 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           path: |
-            out/arch/arm64/boot/Image.gz
-            out/arch/arm64/boot/dts/**/*.dtb
-            out/**/*.ko
+            ${{ env.OUT_DIR }}/arch/arm64/boot/Image.gz
+            ${{ env.OUT_DIR }}/arch/arm64/boot/dts/**/*.dtb
+            ${{ env.OUT_DIR }}/**/*.ko
