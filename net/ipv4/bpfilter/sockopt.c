@@ -33,10 +33,9 @@ int bpfilter_mbox_request(struct sock *sk, int optname, char __user *optval,
 		err = request_module("bpfilter");
 		mutex_lock(&bpfilter_ops.lock);
 
-		if (err)
-			goto out;
-		if (!bpfilter_ops.sockopt) {
-			err = -ECHILD;
+		if (err || !bpfilter_ops.sockopt) {
+			/* An unavailable optional backend must not block xtables. */
+			err = -ENOPROTOOPT;
 			goto out;
 		}
 	}
