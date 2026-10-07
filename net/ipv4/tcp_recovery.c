@@ -18,11 +18,6 @@ static void tcp_rack_mark_skb_lost(struct sock *sk, struct sk_buff *skb)
 	}
 }
 
-static bool tcp_rack_sent_after(u64 t1, u64 t2, u32 seq1, u32 seq2)
-{
-	return t1 > t2 || (t1 == t2 && after(seq1, seq2));
-}
-
 /* RACK loss detection (IETF draft draft-ietf-tcpm-rack-01):
  *
  * Marks a packet lost, if some packet sent later has been (s)acked.
@@ -73,8 +68,8 @@ static void tcp_rack_detect_loss(struct sock *sk, u32 *reo_timeout)
 		    scb->sacked & TCPCB_SACKED_ACKED)
 			continue;
 
-		if (tcp_rack_sent_after(tp->rack.mstamp, skb->skb_mstamp,
-					tp->rack.end_seq, scb->end_seq)) {
+		if (tcp_skb_sent_after(tp->rack.mstamp, skb->skb_mstamp,
+				      tp->rack.end_seq, scb->end_seq)) {
 			/* Step 3 in draft-cheng-tcpm-rack-00.txt:
 			 * A packet is lost if its elapsed time is beyond
 			 * the recent RTT plus the reordering window.
@@ -134,8 +129,8 @@ void tcp_rack_advance(struct tcp_sock *tp, u8 sacked, u32 end_seq,
 	u32 rtt_us;
 
 	if (tp->rack.mstamp &&
-	    !tcp_rack_sent_after(xmit_time, tp->rack.mstamp,
-				 end_seq, tp->rack.end_seq))
+	    !tcp_skb_sent_after(xmit_time, tp->rack.mstamp,
+				end_seq, tp->rack.end_seq))
 		return;
 
 	rtt_us = tcp_stamp_us_delta(tp->tcp_mstamp, xmit_time);
