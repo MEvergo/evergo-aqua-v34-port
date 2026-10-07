@@ -522,7 +522,7 @@ begin:
 
 	rate = q->flow_max_rate;
 	if (skb->sk)
-		rate = min(skb->sk->sk_pacing_rate, rate);
+		rate = min(READ_ONCE(skb->sk->sk_pacing_rate), rate);
 
 	if (rate <= q->low_rate_threshold) {
 		f->credit = 0;
@@ -714,6 +714,10 @@ static int fq_change(struct Qdisc *sch, struct nlattr *opt)
 	if (err < 0)
 		return err;
 
+	if (tb[TCA_FQ_INITIAL_QUANTUM] &&
+	    nla_get_u32(tb[TCA_FQ_INITIAL_QUANTUM]) > (1 << 20))
+		return -EINVAL;
+
 	sch_tree_lock(sch);
 
 	fq_log = q->fq_trees_log;
@@ -732,14 +736,9 @@ static int fq_change(struct Qdisc *sch, struct nlattr *opt)
 	if (tb[TCA_FQ_FLOW_PLIMIT])
 		q->flow_plimit = nla_get_u32(tb[TCA_FQ_FLOW_PLIMIT]);
 
-	if (tb[TCA_FQ_QUANTUM]) {
-		u32 quantum = nla_get_u32(tb[TCA_FQ_QUANTUM]);
-
-		if (quantum > 0 && quantum <= (1 << 20))
-			q->quantum = quantum;
-		else
-			err = -EINVAL;
-	}
+	if (tb[TCA_FQ_QUANTUM])
+		q->quantum = clamp_t(u32, nla_get_u32(tb[TCA_FQ_QUANTUM]),
+				     256, 1 << 20);
 
 	if (tb[TCA_FQ_INITIAL_QUANTUM])
 		q->initial_quantum = nla_get_u32(tb[TCA_FQ_INITIAL_QUANTUM]);
@@ -805,12 +804,14 @@ static void fq_destroy(struct Qdisc *sch)
 static int fq_init(struct Qdisc *sch, struct nlattr *opt)
 {
 	struct fq_sched_data *q = qdisc_priv(sch);
+	u32 mtu;
 	int err;
 
 	sch->limit		= 10000;
 	q->flow_plimit		= 100;
-	q->quantum		= 2 * psched_mtu(qdisc_dev(sch));
-	q->initial_quantum	= 10 * psched_mtu(qdisc_dev(sch));
+	mtu = clamp_t(u32, psched_mtu(qdisc_dev(sch)), 1, 1 << 20);
+	q->quantum		= clamp_t(u32, 2 * mtu, 256, 1 << 20);
+	q->initial_quantum	= min_t(u32, 10 * mtu, 1 << 20);
 	q->flow_refill_delay	= msecs_to_jiffies(40);
 	q->flow_max_rate	= ~0U;
 	q->time_next_delayed_flow = ~0ULL;

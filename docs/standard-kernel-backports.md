@@ -333,3 +333,33 @@ KernelSU 的 credential 域写入与 SID 匹配也必须使用 `selinux_cred()`�
 此前 QEMU 成功记录只覆盖当时临时消费者实际执行的场景；目标产品配置关闭 `CONFIG_TRANSPARENT_HUGEPAGE`，因此 THP 由独立启用 THP 的 1 GiB guest 验证。NVMe/block/ext4/XFS 均使用 QEMU 提供的真实内核驱动和文件系统路径，不代表实体 UFS/eMMC/DMA 行为。
 
 此前 QEMU 最小启动环境只为未启用的 MTK scheduler 提供两个 vendor 链接符号，不模拟 tracing、IO、Landlock、HWBP 或 input 能力。实体 MTK/GT9886 reset/display-PM、实际 UFS/eMMC 与硬件 DMA、多种 major LSM 的实体策略共存仍须平台验证；不将这些未执行路径计入成功记录。
+
+## 标准 BBRv1 / FQ 基础更新
+
+本轮保留标准 BBRv1 的四种模式、原有 gain、带宽/RTT 窗口和 policer 算法。目标 `everpal_defconfig` 内建 `NET_SCH_FQ`，通过已有 `NET_SCH_DEFAULT` / `DEFAULT_FQ` 选择默认 `fq`；`NET_SCHED` 显式启用。`net/sched/Kconfig` 已有完整的 FQ 默认队列选项，与当前上游一致，不另建配置路径。
+
+| 上游来源 | 本树回移行为 |
+|---|---|
+| [78dc70ebaa38](https://github.com/torvalds/linux/commit/78dc70ebaa38aa303274e333be6c98eef87619e2) | ACK aggregation 的 epoch、5–10 round 双窗口和 cwnd 补偿；估计受采样 cwnd 限制，实际补偿受带宽 × 100 ms 限制，idle restart 重置 epoch。按原补丁将 CA 私有区从 88 增至 104 bytes，增加的 16 bytes 全部用于当前 BBRv1 估计器。 |
+| [71abf467bb63](https://github.com/torvalds/linux/commit/71abf467bb630c7e2f4ef33267d98fb7d10d3ce9)、[232aa8ec3ed9](https://github.com/torvalds/linux/commit/232aa8ec3ed979d4716891540c03a806ecab0c37) | 删除立即计算后使用的 `tso_segs_goal` 状态；采用上游 `bbr_bdp()`、`bbr_quantization_budget()`、`bbr_inflight()`，先增加 ACK 补偿再做 TSO/偶数窗口预算。 |
+| [6b3656a60f20](https://github.com/torvalds/linux/commit/6b3656a60f2067738d1a423328199720806f0c44) | 只有 PROBE_BW 的探测 phase `cycle_idx == 0` 增加两个 packets，避免把 cwnd gain 当作 pacing phase 并在 cruise 中持续增加窗口。 |
+| [fb9988622429](https://github.com/torvalds/linux/commit/fb99886224294b2291d267da41395022fa4200e2)、[5490b32dce69](https://github.com/torvalds/linux/commit/5490b32dce6932ea7ee8e3b2f76db2957c92af6e)、[8e995bf14fdb](https://github.com/torvalds/linux/commit/8e995bf14fdb7e33681d5c3312b602fa342b878a) | idle restart 可退出已到期的 PROBE_RTT 并恢复 prior cwnd；零个完整 packet 被 ACK 时仍施加 PROBE_RTT cap；保留 recovery entry 的 packet conservation，直接恢复 recovery exit 的 prior cwnd。 |
+| [cadefe5f584a](https://github.com/torvalds/linux/commit/cadefe5f584abaac40dce72009e4de738cbff467)、[ab408b6dc744](https://github.com/torvalds/linux/commit/ab408b6dc7449c0f791e9e5f8de72fa7428584f2)、[1106a5ade15f](https://github.com/torvalds/linux/commit/1106a5ade15fa2effdbfb3b3a1ba560a536dbcfe) | 回移内部 pacing 的 MSS 计费修复及显式 1% margin，不移植 EDT。旧 FQ 按含 headers 的长度计费，故保留 `cadefe5f584a` 的内部 pacing 用 MSS、FQ 用 MTU 的区分；既有 `tcp_needs_internal_pacing()` 按原上游移至公共 TCP 头，不改变其判断语义。 |
+| [28b24f90020f](https://github.com/torvalds/linux/commit/28b24f90020fed8e8e3e8e20575f08c1cd06e54f) | 仅回移 BBR/FQ 的 pacing rate `READ_ONCE()` / `WRITE_ONCE()` 访问，不改成 lockless `setsockopt()`。 |
+| [b253a0680cea](https://github.com/torvalds/linux/commit/b253a0680ceadc5d7b4acca7aa2d870326cad8ad)、[5a8ad1ce2c60](https://github.com/torvalds/linux/commit/5a8ad1ce2c605ffaae4523d75ca91180f05f1e8b) | rate sample 按发送时间、同时间下 wrap-safe `end_seq` 选取最近发送的 skb；只增加实际需要的 `last_end_seq`。复用上游 `tcp_skb_sent_after()`，RACK 的原比较语义不变；本树 `skb_mstamp` 继续使用微秒。 |
+| [709f34f7c28d](https://github.com/torvalds/linux/commit/709f34f7c28dc4dd6c40343d101850f11e172312)、[094cc07f98df](https://github.com/torvalds/linux/commit/094cc07f98dfe70a34e2a1923af17fd29b8cf622) | FQ 的 MTU 默认 quantum 计算先限制乘数，避免溢出；init/change quantum 限于 256–1 MiB，initial quantum 上限 1 MiB，非法 initial quantum 在更新任何队列选项前拒绝。保留旧 netlink attribute 编号和 U32 布局；这两项是近期上游的窄范围 correctness 修复，不是新队列算法。 |
+
+兼容边界：
+
+- 保留 `sk_pacing_rate` / `sk_max_pacing_rate` / FQ rate 的 U32 类型和 `~0U` 无限速 sentinel；BBR 先以 U64 计算，再受原 socket 上限限制后转换。没有移植会扩展 `SO_MAX_PACING_RATE` 参数处理及通用 socket 布局的 `76a9ebe811fb`。
+- BBR 的 legacy GSO budget / 127-segment goal 与实际 TCP 发送端的设备 `sk_gso_max_size`、`sk_gso_max_segs` 限制各司其职，没有绕过驱动上限。保留 Android/MTK 已有 TSQ rollback；不借本轮改动改变其他 congestion control 的 cwnd/gain/TSO 策略。
+- 普通设备使用默认 FQ；多队列保留 `mq` root 并在实际 TX queues 下使用默认 qdisc，`IFF_NO_QUEUE` 仍为 `noqueue`。默认设置不强制替换 userspace 已安装的 qdisc。
+- 没有 BBRv2/v3、BBRplus、实验性 gain、Prague、L4S、DualPI2 或 CAKE；没有 CE/delivered_ce、独立 send/receive interval 或 future-only congestion state。
+- 不移植 EDT / `tcp_wstamp_ns` / timestamp 重编码 / FQ 按出发时间重排及现代多 band FQ：需要 TCP、skb、TSQ 和 qdisc 成套语义迁移，不能孤立复制较新 BBR/FQ 文件。也未移植 delayed-ACK min-RTT 过滤 `e42866031ff0`：本树缺少 `FLAG_ACK_MAYBE_DELAYED` 判定，不能用未经验证的新启发式冒充上游标志。
+
+本轮验证：
+
+- 沿用 `everpal_defconfig`、ZyC clang 22.0.0、ThinLTO 与已有 Kbuild 参数，仅本地构建 `tcp_bbr.o`、`tcp_rate.o`、`tcp_recovery.o`、`tcp_output.o`、`sch_fq.o`、`sch_api.o`、`sch_generic.o`、`sch_mq.o`、`tcp_cubic.o`、`tcp_westwood.o`，目标命令成功，无新增 compiler warning/error。defconfig 原有重复 `SCHEDSTATS` warning 未在本轮顺手清理。
+- 生效配置为 `NET_SCH_FQ=y`、`NET_SCH_DEFAULT=y`、`DEFAULT_FQ=y`、`DEFAULT_NET_SCH="fq"`，原有 `TCP_CONG_BBR=y` / `DEFAULT_TCP_CONG="bbr"` 保留。
+- 临时宿主程序提取并执行实际源码函数：rate sampling 5 个、BBR pacing/TSO 8 个、BBR ACK/idle/recovery 14 个、FQ init/change 8 个、FQ dequeue pacing 8 个场景全部通过；旧函数在对应采样、pacing/量化、FQ 边界场景出现预期失败。内核环境依赖在 fixture 中隔离，这不是启动后的内核或实机网络验证。
+- 没有本地构建整核；整核、模块链接和镜像生成只交给向 `main` push 后的既有 CI。真实 MTK 蜂窝/Wi-Fi 的吞吐、公平性、ACK aggregation、idle/PROBE_RTT、设备 offload 上限与 userspace qdisc 覆盖仍需真机验证。
