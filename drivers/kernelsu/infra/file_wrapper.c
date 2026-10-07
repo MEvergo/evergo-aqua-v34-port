@@ -12,10 +12,11 @@
 #include <linux/uaccess.h>
 #include <linux/version.h>
 #include <linux/mount.h>
+#include <linux/module.h>
+#include <linux/security.h>
 
 #include "kernel_compat.h"
-
-#include "objsec.h"
+#include "ksu.h"
 
 #include "klog.h" // IWYU pragma: keep
 #include "selinux/selinux.h"
@@ -464,10 +465,8 @@ static struct vfsmount *anon_inode_mnt __read_mostly;
 static struct inode *ksu_anon_inode_make_secure_inode(const char *name, const struct inode *context_inode)
 {
     struct inode *inode;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
     const struct qstr qname = QSTR_INIT(name, strlen(name));
     int error;
-#endif
 
     if (unlikely(!anon_inode_mnt)) {
         return ERR_PTR(-ENODEV);
@@ -477,13 +476,11 @@ static struct inode *ksu_anon_inode_make_secure_inode(const char *name, const st
     if (IS_ERR(inode))
         return inode;
     inode->i_flags &= ~S_PRIVATE;
-#if LINUX_VERSION_CODE >= KERNEL_VERSION(5, 0, 0)
     error = security_inode_init_security_anon(inode, &qname, context_inode);
     if (error) {
         iput(inode);
         return ERR_PTR(error);
     }
-#endif
     return inode;
 }
 
@@ -543,6 +540,8 @@ err:
 int ksu_install_file_wrapper(int fd)
 {
     int out_fd, ret;
+    const struct cred *old_cred;
+    struct file *wrapper_file;
     struct file *orig_file = fget(fd);
     if (!orig_file) {
         return -EBADF;
@@ -560,8 +559,19 @@ int ksu_install_file_wrapper(int fd)
         goto out_put_fd;
     }
 
-    struct file *wrapper_file = ksu_anon_inode_create_getfile_compat("[ksu_fdwrapper]", &file_wrapper_data->ops,
-                                                                     file_wrapper_data, orig_file->f_flags, NULL);
+    if (unlikely(!ksu_cred)) {
+        ret = -EAGAIN;
+        goto out_release_wrapper;
+    }
+
+    /*
+     * Custom root profiles may use a restricted domain. Create both the
+     * anon inode and file security blob with KernelSU's credentials.
+     */
+    old_cred = override_creds(ksu_cred);
+    wrapper_file = ksu_anon_inode_create_getfile_compat("[ksu_fdwrapper]", &file_wrapper_data->ops,
+                                                        file_wrapper_data, orig_file->f_flags, NULL);
+    revert_creds(old_cred);
     if (IS_ERR(wrapper_file)) {
         pr_err("ksu_fdwrapper: getfile failed: %ld\n", PTR_ERR(wrapper_file));
         ret = PTR_ERR(wrapper_file);
@@ -572,24 +582,17 @@ int ksu_install_file_wrapper(int fd)
     // It should be safe to modify them since the file hasn't been published.
 
     struct inode *wrapper_inode = file_inode(wrapper_file);
-    // libc's stdio relies on the fstat() result of the fd to determine its buffer type.
-    wrapper_inode->i_mode = file_inode(orig_file)->i_mode;
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)
-    struct inode_security_struct *wrapper_sec = wrapper_inode->i_security;
-#else
-    struct inode_security_struct *wrapper_sec = selinux_inode(wrapper_inode);
-#endif
-    // Use ksu_file_sid to bypass SELinux check.
-    // When we call `su` from terminal app, this is useful.
-    if (wrapper_sec) {
-        wrapper_sec->sid = ksu_file_sid;
-#if LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)
-        struct inode_security_struct *orig_sec = file_inode(orig_file)->i_security;
-        if (orig_sec)
-            wrapper_sec->sclass = orig_sec->sclass;
-        wrapper_sec->initialized = LABEL_INITIALIZED;
-#endif
+    ret = ksu_relabel_wrapper_inode(wrapper_inode);
+    if (unlikely(ret)) {
+        pr_err("ksu_fdwrapper: relabel failed: %d\n", ret);
+        goto out_put_wrapper_file;
     }
+
+    /*
+     * libc stdio uses fstat() for buffering/TTY behavior. Preserve the
+     * original mode without changing the wrapper's anon_inode class.
+     */
+    wrapper_inode->i_mode = file_inode(orig_file)->i_mode;
     // Install open file operation for inode.
     wrapper_inode->i_fop = &ksu_file_wrapper_inode_fops;
 

@@ -5,6 +5,8 @@
 #include <linux/version.h>
 #include <linux/cred.h>
 
+struct inode;
+
 #define KERNEL_SU_DOMAIN "ksu"
 #define KERNEL_SU_FILE "ksu_file"
 
@@ -36,6 +38,8 @@ int handle_sepolicy(void __user *user_data, u64 data_len);
 void setup_ksu_cred();
 
 void escape_to_root_for_adb_root();
+
+int ksu_relabel_wrapper_inode(struct inode *inode);
 
 extern u32 ksu_file_sid;
 

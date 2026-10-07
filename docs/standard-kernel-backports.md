@@ -191,6 +191,16 @@ KernelSU 的 credential 域写入与 SID 匹配也必须使用 `selinux_cred()`�
 
 已有 `do_move_mount()` 在取得精确来源 path 后、mount attachment 前执行 `security_move_mount()`；本次不为此新造另一个 mount syscall。既有 `security_sb_mount` 检查不删除。ABI 1 的 filesystem topology 限制、规则交集、fork 继承及 ptrace 层级检查均保留固定来源语义。
 
+### KernelSU file wrapper 的 SELinux 生命周期
+
+本树的 4.14 已回移 `security_inode_init_security_anon()`，wrapper 创建必须调用该 hook，不能用 `< 5.0` 推断 API 不存在。原分支跳过 hook，并将 `inode->i_security` 起点直接解释为 SELinux 对象；composite inode blob 前置的 `rcu_head` 使该写入偏离真正的 SELinux 区域。此路径与 MT root shell 经 Binder 传递 PTY FD 时出现的 `system_server -> unlabeled:file { write }` 拒绝吻合。
+
+适配 [当前 KernelSU 上游 wrapper 的安全生命周期](https://raw.githubusercontent.com/tiann/KernelSU/main/kernel/infra/file_wrapper.c)，保留本树 4.14 的 VFS/fops 创建分支。在 `override_creds(ksu_cred)` 下创建 secure anon inode 和 file，使 file security SID 来自 KSU domain；创建调用返回后立即 `revert_creds()`，不在覆写凭据期间发布 FD。`ksu_relabel_wrapper_inode()` 通过 `selinux_inode()` 仅将 inode SID 改为缓存的 `ksu_file` SID，保留 hook 设置的 `anon_inode` class 和 `LABEL_INITIALIZED`；原 PTY 的 `i_mode` 只用于 `fstat()`/stdio/TTY 兼容，不复制它的 SELinux class。
+
+缺少 KSU 凭据或缓存 SID 时返回 `-EAGAIN`；空 inode、安全 blob 缺失或 label 未初始化时返回 `-EINVAL`。失败沿既有清理路径释放 wrapper、原 file 引用与预留 FD，不发布半初始化对象。现有 `domain -> ksu:fd use` 与 `domain -> ksu_file` 规则保持不变，不新增 `system_server -> unlabeled:file` 权限；KernelSU 全树已无裸 `i_security` 访问。
+
+验证边界：宿主临时 C harness 执行实际 secure-inode、relabel、install 函数及 SELinux 初始化函数，VFS、credential 与策略查询依赖使用受控 shim。修复前的 4.14 分支返回未初始化 inode；修复后检查 composite blob 前缀、SID-only relabel、未就绪拒绝与清理，另完成 100 次 install/release 及 10 个失败路径，ASan/UBSan 未报告错误。已完成 ARM64 KernelSU 定向构建；后续整核构建交由 push CI。本次未刷机，以上结果不证明实机 Binder、MT PTY、settings/cmd 或 AVC 回归已通过。
+
 ## 文件级新增与改动登记
 
 下列清单记录本轮标准回移及相关自定义接口变化；同一文件可服务多个能力，但不重复维护第二套实现。生成的 `out/` 产物不是手写标准功能替代物。已有无关 KernelSu/KPM 改动保持不动，不归入本轮回移。

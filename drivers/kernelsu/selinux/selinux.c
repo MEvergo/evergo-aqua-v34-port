@@ -14,9 +14,8 @@
  * A value of 0 means "no cached SID is available" for that context.
  * This covers both the initial "not yet cached" state and any case
  * where resolving the SID (e.g. via security_secctx_to_secid) failed.
- * In all such cases we intentionally fall back to the slower
- * string-based comparison path; this degrades performance only and
- * does not cause a functional failure.
+ * Context comparisons fall back to the slower string-based path.
+ * Wrapper creation instead fails closed if the ksu_file SID is unavailable.
  */
 static u32 cached_su_sid __read_mostly = 0;
 static u32 cached_zygote_sid __read_mostly = 0;
@@ -165,6 +164,34 @@ void cache_sid(void)
     } else {
         pr_info("Cached ksu_file SID: %u\n", ksu_file_sid);
     }
+}
+
+int ksu_relabel_wrapper_inode(struct inode *inode)
+{
+    struct inode_security_struct *isec;
+    u32 sid;
+
+    if (unlikely(!inode))
+        return -EINVAL;
+
+    sid = READ_ONCE(ksu_file_sid);
+    if (unlikely(!sid))
+        return -EAGAIN;
+
+    isec = selinux_inode(inode);
+    if (unlikely(!isec))
+        return -EINVAL;
+
+    if (unlikely(isec->initialized != LABEL_INITIALIZED))
+        return -EINVAL;
+
+    /*
+     * This inode has not been published. Keep the LSM-assigned anon_inode
+     * class and replace only its SID with KernelSU's dedicated file SID.
+     */
+    isec->sid = sid;
+
+    return 0;
 }
 
 /*
