@@ -112,6 +112,12 @@ GT9886 除保留 pen slot 外，在 sysfs reset、`goodix_ts_hw_init()`、ESD re
 
 `goodix_ts_suspend()` 由 PM、framebuffer 和 early-suspend 路径调用，在进入硬件睡眠/断电前使 session 失效；若扩展模块随后取消 suspend，旧 session 仍保持失效。NORMANDY `goodix_hw_resume()` 在硬件恢复中会 reset 芯片，Goodix resume 路径只在恢复成功且设备未保持 suspended 时平衡 overlay suspend。该 balance 不重新激活旧 session。具体边界见 [GT9886 core](../drivers/input/touchscreen/GT9886/goodix_ts_core.c)、[I2C reset implementation](../drivers/input/touchscreen/GT9886/goodix_ts_i2c.c)、[tools ioctl](../drivers/input/touchscreen/GT9886/goodix_ts_tools.c) 和 [firmware updater](../drivers/input/touchscreen/GT9886/goodix_gtx8_update.c)。
 
+### NT36672C 掌压通知与物理触点帧
+
+NT36672C 的 `DATA_PROTOCOL=30`、`FUNCPAGE_PALM=4` 数据是掌压状态通知，不是完整触点快照。[IRQ 处理](../drivers/input/touchscreen/NT36672C/nt36xxx.c)在校验和既有休眠手势处理之后单独识别该功能页，跳过普通手指解析、slot 释放及对触屏设备的 `input_sync()`，避免把没有普通手指记录的通知误报成全抬起；同帧的独立笔报告仍照常解析和同步。真正的零触点帧仍立即释放触点；不引入抬手防抖，不更改 IRQ 调度或 overlay 合并规则。
+
+分流依据见[同芯片参考实现](https://github.com/Jebaitedneko/android_kernel_xiaomi_vayu/blob/bdcf7e8a447341d47c1a1e7c37b72f33c9752f88/drivers/input/touchscreen/nt36672c/nt36xxx.c#L1475-L1479)。运行 `python3 scripts/test-nvt-palm.py` 可离线执行实际 IRQ 路径，覆盖掌压 ON/OFF 通知保持手指触点与 tracking ID、后续移动、通信错误、真实抬手，以及同帧笔按下、移动和抬起；SPI、锁和 input 设备边界由主机测试替代。该回归不代表实体设备验证，也不能证明此前采集的每次断触都来自掌压通知，因为未记录控制器原始包。
+
 ### 最小调用函数
 
 下面的函数消费现有 session/event 与调用方已构造的触点快照，不假设某种驱动或设备。调用前确保 session 有效、event 存活，且未持有 `dev->event_lock`；查询配置期间还须与 event 修改、rollback、remove 串行化。它不是跨 MT/HWBP 的原子事务：若后续查询失败，已经成功发布的触点快照不会回滚。

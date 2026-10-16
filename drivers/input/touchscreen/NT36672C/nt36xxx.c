@@ -69,7 +69,6 @@ extern int32_t nvt_mp_proc_init(void);
 extern void nvt_mp_proc_deinit(void);
 #endif
 
-static int32_t nvt_check_palm(uint8_t input_id, uint8_t *data);
 static void nvt_callback_work(struct work_struct *work);
 
 struct nvt_ts_data *ts;
@@ -1053,6 +1052,14 @@ static void nvt_flash_proc_deinit(void)
 }
 #endif
 
+/* Firmware function-page protocol, shared by palm and gesture reports. */
+#define DATA_PROTOCOL           30
+
+static int32_t nvt_check_palm(uint8_t input_id, uint8_t *data)
+{
+	return input_id == DATA_PROTOCOL && data[2] == FUNCPAGE_PALM;
+}
+
 #if WAKEUP_GESTURE
 #define GESTURE_WORD_C          12
 #define GESTURE_WORD_W          13
@@ -1067,8 +1074,6 @@ static void nvt_flash_proc_deinit(void)
 #define GESTURE_SLIDE_DOWN      22
 #define GESTURE_SLIDE_LEFT      23
 #define GESTURE_SLIDE_RIGHT     24
-/* customized gesture id */
-#define DATA_PROTOCOL           30
 
 /* function page definition */
 #define FUNCPAGE_GESTURE         1
@@ -1583,14 +1588,20 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
    }
 #endif /* POINT_DATA_CHECKSUM */
 
+	input_id = (uint8_t)(point_data[1] >> 3);
+
 #if WAKEUP_GESTURE
 	if (likely(bTouchIsAwake == 0)&&(ts->gesture_enabled) ){
-		input_id = (uint8_t)(point_data[1] >> 3);
 		nvt_ts_wakeup_gesture_report(input_id, point_data);
 		mutex_unlock(&ts->lock);
 		return IRQ_HANDLED;
 	}
 #endif
+
+	/* Palm notifications are not complete touch snapshots. */
+	if (nvt_check_palm(input_id, point_data)) {
+		goto report_pen;
+	}
 
 	for (i = 0; i < ts->max_touch_num; i++) {
 		position = 1 + 6 * i;
@@ -1663,6 +1674,7 @@ static irqreturn_t nvt_ts_work_func(int irq, void *data)
 
 	input_sync(ts->input_dev);
 
+report_pen:
 	if (ts->pen_support) {
 /*
 		//--- dump pen buf ---
