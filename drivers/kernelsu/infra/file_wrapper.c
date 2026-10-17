@@ -18,6 +18,7 @@
 #include "kernel_compat.h"
 #include "ksu.h"
 
+#include "ksu.h"
 #include "klog.h" // IWYU pragma: keep
 #include "selinux/selinux.h"
 

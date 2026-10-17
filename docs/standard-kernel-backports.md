@@ -201,6 +201,18 @@ KernelSU 的 credential 域写入与 SID 匹配也必须使用 `selinux_cred()`�
 
 验证边界：宿主临时 C harness 执行实际 secure-inode、relabel、install 函数及 SELinux 初始化函数，VFS、credential 与策略查询依赖使用受控 shim。修复前的 4.14 分支返回未初始化 inode；修复后检查 composite blob 前缀、SID-only relabel、未就绪拒绝与清理，另完成 100 次 install/release 及 10 个失败路径，ASan/UBSan 未报告错误。已完成 ARM64 KernelSU 定向构建；后续整核构建交由 push CI。本次未刷机，以上结果不证明实机 Binder、MT PTY、settings/cmd 或 AVC 回归已通过。
 
+### SukiSU-Ultra v4.2.1 发布同步
+
+2026-10-17 核对 [最新正式 release v4.2.1](https://github.com/SukiSU-Ultra/SukiSU-Ultra/releases/tag/v4.2.1)，发布的 Manager APK 为 `SukiSU_v4.2.1_40994-release.apk`。不能仅按 tag 同步：tag 指向 `fd2a85151c8312fd9b4237db9ba827dcea692228`，其提交计数为 3807，而实际 APK 来自 [Build Manager run 38714804762](https://github.com/SukiSU-Ultra/SukiSU-Ultra/actions/runs/38714804762) 的 `Manager` artifact，对应提交 [`dfae923781350cb5113e0763a17e90cc4edd59b4`](https://github.com/SukiSU-Ultra/SukiSU-Ultra/commit/dfae923781350cb5113e0763a17e90cc4edd59b4)。下载该 artifact 后，APK SHA256 与 release asset 的 digest 均为 `c7f69280cf468e8415c585ff31f963d0147386831217a1e89b822afddc5f40ed`；该提交计数 3809，依上游公式 `40000 + 3809 - 2815 = 40994`。
+
+`drivers/kernelsu/` 以此发布产物对应提交为基线，不跟踪后续 `main`。同步 scoped su-session FD、UAPI v5、动态 Manager 授权、Manager 包名/签名回退验证、启动配置强制 feature、shell su 的 ADB-only feature 与 module blacklist。`Kbuild` 固定默认版本 `40994`、完整版本 `v4.2.1-dfae9237@release`，删除构建入口的旧 `40900` 覆盖；不从宿主产品内核 Git 历史或构建时联网查询生成 SukiSU 版本。
+
+本树不是上游源码的无适配覆盖：保留 4.14 ARM64 六参数 syscall ABI、nofault/signal helper 适配、旧 fsnotify/task_work 接口、SUSFS、composite SELinux blob accessor 与上述 secure wrapper 生命周期。原生 ARM64 KPM loader、hook/relocation 实现及 `CONTROL_EX`/`CONTROL1` UAPI 扩展保留；发布基线没有新的 KPM 实现变更，不用上游供外部 patch 使用的 stub 替换现有 loader。
+
+验证边界：使用项目固定的 ZyC clang/LLD 22.0.0、`everpal_defconfig` 与启用的 KPM/SUSFS 完成 ARM64 `security/selinux/` 和 `drivers/kernelsu/` 定向构建；首次在全新输出目录直接编译 KernelSU 时缺少生成的 `flask.h`，先构建 SELinux 后补齐，不向源码复制生成头。最终构建输出确认版本 `40994 [v4.2.1-dfae9237@release]`。宿主运行上游/本树 UAPI 消费者，确认 UAPI 5、Manager ioctl/结构布局一致，并检查本树 KPM 扩展布局；ASan/UBSan 临时 harness 执行实际 feature 实现，覆盖强制配置优先级、延迟成功后不重复应用和无效输入边界。`bash -n build.sh` 通过。整核构建由 main push CI 执行；本次不刷机，不将定向编译或宿主 shim 验证视为实机 root、Manager 授权或 SELinux 隐藏能力的运行证明。
+
+上游行为边界（仅静态审查，未实机复现）：本发布版本在启用动态 Manager 后，UID 授权路径查询注册表但不检查该条目的 APK verified 位；tracker 的内置包优先和签名回退路径也限制了其他动态包进入独立验证分支。`sucompat` 的 root profile 应用失败只记录日志，随后若 exec 成功，仍会安装 scoped su-session FD。这些代码与上述官方发布提交一致，本次版本同步不另行改变上游授权语义；不能据此声称动态多 Manager 或 profile 失败路径已经通过安全验证。
+
 ## 文件级新增与改动登记
 
 下列清单记录本轮标准回移及相关自定义接口变化；同一文件可服务多个能力，但不重复维护第二套实现。生成的 `out/` 产物不是手写标准功能替代物。已有无关 KernelSu/KPM 改动保持不动，不归入本轮回移。

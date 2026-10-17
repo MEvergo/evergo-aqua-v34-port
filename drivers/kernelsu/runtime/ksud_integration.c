@@ -28,6 +28,8 @@
 #include "ksu.h"
 #include "runtime/ksud.h"
 #include "runtime/ksud_boot.h"
+#include "policy/feature.h"
+#include "feature/module_blacklist.h"
 #include "selinux/selinux.h"
 #include "hook/syscall_hook.h"
 #include "kernel_compat.h"
@@ -168,6 +170,11 @@ void ksu_handle_execveat_ksud(const char *path, struct user_arg_ptr *argv)
             apply_kernelsu_rules();
             cache_sid();
             setup_ksu_cred();
+            // after apply_kernelsu_rules, so that selinux_hide has its sepolicy backup
+            ksu_feature_apply_forced();
+            // Not earlier: a blocked module failing to load in first stage
+            // init is fatal, ksuinit uses modules.blocklist for that instead.
+            ksu_module_blacklist_apply();
             init_second_stage_executed = true;
         }
     }
@@ -549,7 +556,7 @@ static void ksu_execve_hook_ksud_common(const char __user *filename_user, const 
 
 void ksu_execve_hook_ksud(const struct pt_regs *regs)
 {
-    const char __user *filename_user = (const char __user *)PT_REGS_PARM1(regs);
+    const char __user *filename_user = (const char __user *)PT_REGS_SYSCALL_PARM1(regs);
     const char __user *const __user *argv_user = (const char __user *const __user *)PT_REGS_PARM2(regs);
 
     ksu_execve_hook_ksud_common(filename_user, argv_user);
@@ -578,7 +585,7 @@ static long ksu_sys_read(const struct pt_regs *regs)
 #if defined(__aarch64__) && LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)
     struct pt_regs *regs = task_pt_regs(current);
 #endif
-    unsigned int fd = PT_REGS_PARM1(regs);
+    unsigned int fd = PT_REGS_SYSCALL_PARM1(regs);
     char __user **buf_ptr = (char __user **)&PT_REGS_PARM2(regs);
     size_t *count_ptr = (size_t *)&PT_REGS_PARM3(regs);
 
@@ -601,7 +608,7 @@ static long ksu_sys_fstat(const struct pt_regs *regs)
 #if defined(__aarch64__) && LINUX_VERSION_CODE < KERNEL_VERSION(5, 0, 0)
     struct pt_regs *regs = task_pt_regs(current);
 #endif
-    unsigned int fd = PT_REGS_PARM1(regs);
+    unsigned int fd = PT_REGS_SYSCALL_PARM1(regs);
     void __user *statbuf = (void __user *)PT_REGS_PARM2(regs);
     bool is_rc = false;
     long ret;

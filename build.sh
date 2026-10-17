@@ -84,7 +84,6 @@ else
 fi
 make -j"$JOBS" O="$OUT_DIR" \
     ARCH=arm64 \
-    KSU_VERSION=40900 \
     CC="$CC" \
     HOSTCC="$HOSTCC" \
     LD="$LD" \

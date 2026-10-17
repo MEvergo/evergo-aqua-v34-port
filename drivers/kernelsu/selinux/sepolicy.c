@@ -151,10 +151,13 @@ static struct avtab_node *get_avtab_node(struct policydb *db, struct avtab_key *
         if (!node)
             return NULL;
 
-        grow_size = sizeof(struct avtab_key) + sizeof(struct avtab_datum);
+        grow_size = sizeof(key->source_type) + sizeof(key->target_type) + sizeof(key->target_class) +
+                    sizeof(key->specified);
         if (key->specified & AVTAB_XPERMS) {
-            grow_size = sizeof(struct avtab_key) + sizeof(u8) * 2 +
-                        sizeof(u32) * ARRAY_SIZE(avdatum.u.xperms->perms.p);
+            grow_size += sizeof(avdatum.u.xperms->specified) + sizeof(avdatum.u.xperms->driver) +
+                         sizeof(avdatum.u.xperms->perms.p);
+        } else {
+            grow_size += sizeof(avdatum.u.data);
         }
         db->len += grow_size;
     }
@@ -186,7 +189,8 @@ static bool remove_avtab_node(struct policydb *db, struct avtab_node *node)
 {
     int i;
     int ret;
-    int shrink_size = sizeof(struct avtab_key) + sizeof(struct avtab_datum);
+    int shrink_size = sizeof(node->key.source_type) + sizeof(node->key.target_type) + sizeof(node->key.target_class) +
+                      sizeof(node->key.specified);
     struct avtab removed = {};
     struct avtab_node *n;
     struct avtab_node *prev;
@@ -226,9 +230,12 @@ static bool remove_avtab_node(struct policydb *db, struct avtab_node *node)
             if (db->te_avtab.nel > 0)
                 db->te_avtab.nel--;
 
-            if ((n->key.specified & AVTAB_XPERMS) && n->datum.u.xperms)
-                shrink_size = sizeof(struct avtab_key) + sizeof(u8) * 2 +
-                              sizeof(u32) * ARRAY_SIZE(n->datum.u.xperms->perms.p);
+            if ((n->key.specified & AVTAB_XPERMS) && n->datum.u.xperms) {
+                shrink_size += sizeof(n->datum.u.xperms->specified) + sizeof(n->datum.u.xperms->driver) +
+                               sizeof(n->datum.u.xperms->perms.p);
+            } else if (!(n->key.specified & AVTAB_XPERMS)) {
+                shrink_size += sizeof(n->datum.u.data);
+            }
             n->next = NULL;
             removed.nel = 1;
             avtab_destroy(&removed);
